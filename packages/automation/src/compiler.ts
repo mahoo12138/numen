@@ -215,7 +215,15 @@ export function compileAutomation(
       .join(',')
   )
 
-  const validateExpression = (expression: ValueExpr, nodeId: string, fieldPath: string): void => {
+  const validateAdmissionReference = (path: string, nodeId: string, fieldPath: string): void => {
+    const root = path.split('.')[0]
+    if (root === 'trigger' || root === 'input') return
+    const code = root === 'steps' ? 'STEP_REFERENCE_NOT_READY'
+      : root === 'loop' ? 'LOOP_REFERENCE_OUT_OF_SCOPE' : 'POLICY_GROUP_BY_REFERENCE_INVALID'
+    report({ severity: 'error', code, message: 'policy.groupBy can read only trigger and input references before the flow starts.', source: { nodeId, fieldPath } })
+  }
+
+  const validateExpression = (expression: ValueExpr, nodeId: string, fieldPath: string, admission = false): void => {
     if (!expression || typeof expression !== 'object' || typeof expression.type !== 'string') {
       report({ severity: 'error', code: 'UNKNOWN_EXPRESSION', message: 'Expression must have a type.', source: { nodeId, fieldPath } })
       return
@@ -229,21 +237,21 @@ export function compileAutomation(
       case 'ref':
         if (typeof expression.path !== 'string' || !refPattern.test(expression.path)) {
           report({ severity: 'error', code: 'INVALID_REFERENCE', message: `Invalid reference: ${expression.path}`, source: { nodeId, fieldPath } })
-        }
+        } else if (admission) validateAdmissionReference(expression.path, nodeId, fieldPath)
         break
       case 'array':
         if (!Array.isArray(expression.items)) {
           report({ severity: 'error', code: 'EXPRESSION_ARRAY_INVALID', message: 'Array expression requires items.', source: { nodeId, fieldPath } })
           break
         }
-        expression.items.forEach((item, index) => validateExpression(item, nodeId, `${fieldPath}.${index}`))
+        expression.items.forEach((item, index) => validateExpression(item, nodeId, `${fieldPath}.${index}`, admission))
         break
       case 'object':
         if (!expression.entries || typeof expression.entries !== 'object' || Array.isArray(expression.entries)) {
           report({ severity: 'error', code: 'EXPRESSION_OBJECT_INVALID', message: 'Object expression requires entries.', source: { nodeId, fieldPath } })
           break
         }
-        Object.entries(expression.entries).forEach(([key, item]) => validateExpression(item, nodeId, `${fieldPath}.${key}`))
+        Object.entries(expression.entries).forEach(([key, item]) => validateExpression(item, nodeId, `${fieldPath}.${key}`, admission))
         break
       case 'template':
         if (!Array.isArray(expression.parts)) {
@@ -253,7 +261,7 @@ export function compileAutomation(
         expression.parts.forEach((part, index) => {
           if (typeof part !== 'string' && (!part || typeof part !== 'object' || typeof part.ref !== 'string' || !refPattern.test(part.ref))) {
             report({ severity: 'error', code: 'INVALID_REFERENCE', message: 'Invalid template reference.', source: { nodeId, fieldPath: `${fieldPath}.parts.${index}` } })
-          }
+          } else if (admission && typeof part !== 'string') validateAdmissionReference(part.ref, nodeId, `${fieldPath}.parts.${index}`)
         })
         break
       case 'call': {
@@ -280,7 +288,7 @@ export function compileAutomation(
             })
           }
         }
-        expression.arguments.forEach((item, index) => validateExpression(item, nodeId, `${fieldPath}.arguments.${index}`))
+        expression.arguments.forEach((item, index) => validateExpression(item, nodeId, `${fieldPath}.arguments.${index}`, admission))
         break
       }
       default:
@@ -716,9 +724,12 @@ export function compileAutomation(
     report({ severity: 'error', code: 'POLICY_STRUCTURE_INVALID', message: 'policy must be an object.', source: { fieldPath: 'policy' } })
   }
   if (source.policy?.maxActive !== undefined && (!Number.isSafeInteger(source.policy.maxActive) || source.policy.maxActive < 1)) {
-    report({ severity: 'error', code: 'POLICY_MAX_ACTIVE_INVALID', message: 'policy.maxActive must be a positive integer.', source: { fieldPath: 'policy.maxActive' } })
+    report({ severity: 'error', code: 'POLICY_MAX_ACTIVE_INVALID', message: 'policy.maxActive must be a positive safe integer.', source: { fieldPath: 'policy.maxActive' } })
   }
-  if (source.policy?.groupBy) validateExpression(source.policy.groupBy, '__policy', 'policy.groupBy')
+  if (source.policy?.overflow !== undefined && !['queue', 'drop', 'replace'].includes(source.policy.overflow)) {
+    report({ severity: 'error', code: 'POLICY_OVERFLOW_INVALID', message: 'policy.overflow must be queue, drop, or replace.', source: { fieldPath: 'policy.overflow' } })
+  }
+  if (source.policy?.groupBy !== undefined) validateExpression(source.policy.groupBy, '__policy', 'policy.groupBy', true)
 
   const inputDiagnostics = validateAutomationInputDeclarations(source.inputs)
   diagnostics.push(...inputDiagnostics)

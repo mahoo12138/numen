@@ -85,6 +85,7 @@ const attemptStatus = z.union([
 const cancellationReason = z.union([
   'USER', 'PARENT', 'RACE', 'TIMEOUT', 'PROVIDER_DISPOSED',
   'CONNECTION_DISPOSED', 'RECONFIGURED', 'SHUTDOWN', 'CREDENTIAL_ROTATED',
+  'OVERFLOW', 'REPLACED',
 ])
 
 export const workbenchCancelRunAction: ConsoleActionDefinition<

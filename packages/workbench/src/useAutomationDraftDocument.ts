@@ -519,6 +519,7 @@ export interface AutomationDraftDocumentModel {
   setExtensionInput(nodeId: string, fieldName: string, expression?: ValueExpr): void
   setCapabilityInput(nodeId: string, fieldName: string, expression?: ValueExpr): void
   setAutomationInputs(inputs: AutomationSource['inputs']): void
+  setAutomationPolicy(policy: AutomationSource['policy']): void
   setControlExpression(nodeId: string, field: 'condition' | 'items', expression: ValueExpr): void
   setWaitExpression(nodeId: string, field: 'durationMs' | 'until', expression: ValueExpr): void
   undo(): void
@@ -816,6 +817,7 @@ export function useAutomationDraftDocument({
     setTriggerConfig,
     setExtensionInput,
     setAutomationInputs: inputs => dispatch({ type: 'EDIT', command: { type: 'SET_AUTOMATION_INPUTS', inputs } }),
+    setAutomationPolicy: policy => dispatch({ type: 'EDIT', command: { type: 'SET_AUTOMATION_POLICY', policy } }),
     setControlExpression,
     setWaitExpression,
     undo,

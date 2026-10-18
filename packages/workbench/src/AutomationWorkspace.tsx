@@ -1,4 +1,5 @@
 import { AutomationInputs } from './AutomationInputs.js'
+import { AutomationAdmissionSettings, isAutomationPolicyProblem } from './AutomationAdmissionSettings.js'
 import { GraphNodeFocus } from './GraphNodeFocus.js'
 import { GraphConversionPanel } from './GraphConversionPanel.js'
 import { GraphLocalTestPanel } from './GraphLocalTestPanel.js'
@@ -89,6 +90,7 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
   const lifecycleError = ref<string>()
   const requestedStepId = ref('notification')
   const fieldFocus = ref<InspectorFieldFocus>()
+  const policyFocus = ref<{ fieldPath?: string; request: number }>()
   const focusedNodeId = ref<string>()
   const connectionProtection = ref(false)
   const connectionReturn = ref<{ ticket: AutomationConnectionReturn; data?: WorkbenchConnectionsIndex; connectionId?: string; request: number }>()
@@ -261,7 +263,10 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
     const requested = query.get('automation')
     if (requested) { requestedAutomationId.value = requested; confirmedAutomationId.value = requested }
     const tab = query.get('tab')
-    if (tab && ['Editor', 'Runs', 'Revisions', 'State', 'Settings'].includes(tab)) activeTab.value = tab
+    if (tab && ['Editor', 'Runs', 'Revisions', 'State', 'Settings'].includes(tab)) {
+      activeTab.value = tab
+      if (tab !== 'Editor') props.onInspectorOpenChange(false)
+    }
     if (query.get('create') === '1') createRequest.value += 1
   }, { immediate: true })
   watch(needsProtection, (protect, _previous, cleanup) => {
@@ -271,7 +276,7 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
     cleanup(() => window.removeEventListener('beforeunload', beforeUnload))
   }, { immediate: true, flush: 'sync' })
   watch(() => inputs.hasUncommitted, pending => { if (!pending) inputBlocked.value = false }, { flush: 'sync' })
-  watch(automationId, () => { inputs.clear(); inputBlocked.value = false; draftTestMounted.value = false; draftTestOpen.value = false; lastDraftTest.value = undefined; draftTestProtection.value = false; focusedNodeId.value = undefined; connectionReturn.value = undefined; connectionReturnController?.abort(); connectionProtection.value = false })
+  watch(automationId, () => { inputs.clear(); inputBlocked.value = false; draftTestMounted.value = false; draftTestOpen.value = false; lastDraftTest.value = undefined; draftTestProtection.value = false; focusedNodeId.value = undefined; policyFocus.value = undefined; connectionReturn.value = undefined; connectionReturnController?.abort(); connectionProtection.value = false })
   const publishDraft = () => {
     blurCurrentInput()
     if (inputs.hasUncommitted) { inputBlocked.value = true; return }
@@ -564,7 +569,15 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
       ...(editable.value ? { onRetrySave: authoring.retrySave } : {}),
     } : {}),
     ...(props.consoleClient && authoring.document ? {
-      inputSettings: h(AutomationInputs, { key: authoring.document.automationId, inputs: authoring.document.source.inputs, canEdit: editable.value && authoring.canEdit, problems: authoring.problems, onChange: inputs => { if (editable.value) authoring.setAutomationInputs(inputs) }, ...(props.schemaUI ? { schemaUI: props.schemaUI } : {}) }),
+      inputSettings: h('div', { class: 'automation-settings', key: authoring.document.automationId }, [
+        h(AutomationAdmissionSettings, {
+          source: authoring.document.source, canEdit: editable.value && authoring.canEdit, problems: authoring.problems,
+          ...(policyFocus.value ? { focusFieldPath: policyFocus.value.fieldPath, focusRequest: policyFocus.value.request } : {}),
+          ...(variableCatalogState.status === 'READY' ? { variableCatalog: variableCatalogState.data } : {}),
+          onChange: policy => { if (editable.value) authoring.setAutomationPolicy(policy) }, ...(props.schemaUI ? { schemaUI: props.schemaUI } : {}),
+        }),
+        h(AutomationInputs, { inputs: authoring.document.source.inputs, canEdit: editable.value && authoring.canEdit, problems: authoring.problems, onChange: inputs => { if (editable.value) authoring.setAutomationInputs(inputs) }, ...(props.schemaUI ? { schemaUI: props.schemaUI } : {}) }),
+      ]),
       manualRunForm: h(AutomationRuns, { key: authoring.document.automationId, automationId: authoring.document.automationId, archived: archived.value, consoleClient: props.consoleClient, ...(props.schemaUI ? { schemaUI: props.schemaUI } : {}), ...(props.navigation ? { navigation: props.navigation } : {}) }),
       ...(draftTestMounted.value ? { draftTestForm: h('section', { class: 'automation-draft-test' }, [
         ...(lastDraftTest.value?.sourceDraftVersion ? [h('p', { role: 'status', class: 'draft-test-result' }, [
@@ -672,6 +685,13 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
 
   const selectProblem = (sourceRef: SourceRef) => {
     const nodeId = sourceRef.nodeId
+    if (isAutomationPolicyProblem(sourceRef)) {
+      if (!allowInputChange()) return
+      activeTab.value = 'Settings'
+      policyFocus.value = { ...(sourceRef.fieldPath ? { fieldPath: sourceRef.fieldPath } : {}), request: (policyFocus.value?.request ?? 0) + 1 }
+      props.onInspectorOpenChange(false)
+      return
+    }
     if (!nodeId) return
     if (!allowInputChange()) return
     if (nodeId === '__inputs') { activeTab.value = 'Settings'; props.onInspectorOpenChange(false); return }

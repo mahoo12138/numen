@@ -399,6 +399,8 @@ function eventDetail(type: string, payload: Record<string, NumenValue> | undefin
   const error = errorSummary(payload.error)
   if (error) return error
   const reason = stringValue(payload.reason)
+  if (reason === 'OVERFLOW') return 'Concurrency limit reached; the new run was cancelled before execution.'
+  if (reason === 'REPLACED') return 'Replaced by a newer run in the same concurrency group.'
   if (reason) return `Reason: ${humanizeToken(reason)}`
   const wakeAt = stringValue(payload.wakeAt)
   if (wakeAt) return `Wake at ${wakeAt}`

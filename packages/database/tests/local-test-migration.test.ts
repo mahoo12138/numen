@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { coreMigrations, runMigrations } from '../src/migrations.js'
 import { captureDraftTestV14Rows, populateDraftTestV14Fixture } from './fixtures/draft-test-v14.js'
 
+const localTestMigrations = coreMigrations.filter(migration => migration.version <= 17)
+
 describe('output sample and local test migration', () => {
   it('preserves populated v16 history, guards formal snapshots, and rejects downgrade without changing data', () => {
     const db = new Database(':memory:')
@@ -10,7 +12,7 @@ describe('output sample and local test migration', () => {
       populateDraftTestV14Fixture(db)
       runMigrations(db, coreMigrations.filter(migration => migration.version <= 16))
       const before = captureDraftTestV14Rows(db)
-      expect(runMigrations(db)).toBe(1)
+      expect(runMigrations(db, localTestMigrations)).toBe(1)
       const after = captureDraftTestV14Rows(db)
       expect(after.automation_output_samples).toEqual([])
       delete after.automation_output_samples
@@ -24,7 +26,7 @@ describe('output sample and local test migration', () => {
       expect(() => runMigrations(db, coreMigrations.filter(migration => migration.version <= 16))).toThrow('unsupported database schema version 17')
       expect(captureDraftTestV14Rows(db)).toEqual(unchanged)
       expect(db.pragma('foreign_key_check')).toEqual([])
-      expect(runMigrations(db)).toBe(0)
+      expect(runMigrations(db, localTestMigrations)).toBe(0)
     } finally { db.close() }
   })
 })

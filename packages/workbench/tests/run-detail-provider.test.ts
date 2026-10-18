@@ -216,6 +216,18 @@ describe('Workbench Run detail Provider', () => {
       cancelReason: 'USER',
     })
     expect(root.scheduler.getRun(cancellable.id)).toMatchObject({ status: 'CANCELLED', cancelReason: 'USER' })
+    for (const [reason, explanation] of [
+      ['OVERFLOW', 'Concurrency limit reached; the new run was cancelled before execution.'],
+      ['REPLACED', 'Replaced by a newer run in the same concurrency group.'],
+    ] as const) {
+      const cancelled = root.scheduler.startManual(created.automation.id, { password: 'never-project-me' })
+      root.scheduler.cancelRun(cancelled.id, reason)
+      const policyDetail = await root.console.query(workbenchRunDetailQuery, { runId: cancelled.id, executionLimit: 25, eventLimit: 100 }, request())
+      expect(policyDetail.run).toMatchObject({ status: 'CANCELLED', cancelReason: reason })
+      expect(policyDetail.timeline.items).toContainEqual(expect.objectContaining({ type: 'RunCancelled', detail: explanation }))
+      expect(JSON.stringify(policyDetail)).not.toContain('never-project-me')
+      expect(await root.console.action(workbenchCancelRunAction, { runId: cancelled.id }, request())).toMatchObject({ status: 'CANCELLED', cancelReason: reason })
+    }
     await expect(root.console.action(workbenchCancelRunAction, { runId: 'run_missing' }, request())).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',

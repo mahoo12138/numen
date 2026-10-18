@@ -63,6 +63,11 @@ email, and CSV parsing/export. Configure credentials and connections through the
 existing Schema forms. See [the MQTT → CSV → email guide](docs/29-official-messaging-integrations.md)
 and [ecosystem comparison and remaining platform gaps](docs/28-ecosystem-comparison.md).
 
+Automation concurrency policies support persistent queues, dropping new runs and
+replacing the oldest active runs, with optional grouping by accepted trigger/input
+data. Test runs have separate capacity from production runs. See
+[run admission, cancellation and recovery](docs/30-run-admission.md).
+
 ## Languages
 
 Workbench supports English and Simplified Chinese. Use the language selector in

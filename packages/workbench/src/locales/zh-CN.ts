@@ -1,9 +1,11 @@
 import { graphFocusZhCN } from './graph-focus.js'
 import { localTestZhCN } from './local-test.js'
 import { readonlyGraphZhCN } from './readonly-graph.js'
+import { admissionZhCN } from './admission.js'
 import type { enUS } from './en-US.js'
 
 export const zhCN = {
+  ...admissionZhCN,
   ...readonlyGraphZhCN,
   ...localTestZhCN,
   "workbench.graph.conversionPreview": "预览为图",

@@ -246,6 +246,7 @@ function RunDetailHeader({ state, cancellation, onBack, onCancel, onLogs, onAuto
       <div class="run-detail-heading">
         <h1>{run?.automationName ?? t('workbench.runDetail')}</h1>
         <p>{run ? run.snapshotPurpose === 'draft-test' ? `${run.id} · ${t('workbench.draftTest.target', { version: run.sourceDraftVersion })}` : t('workbench.value0RevisionValue1', { value0: run.id, value1: run.revisionNumber ?? run.revisionId }) : t('workbench.durableExecutionTimelineAndDiagnostics')}</p>
+        {run?.cancelReason === 'OVERFLOW' || run?.cancelReason === 'REPLACED' ? <p class="run-cancel-reason" role="status">{t(`workbench.cancellation.${run.cancelReason}`)}</p> : null}
       </div>
       {run ? (
         <div class="run-detail-actions">

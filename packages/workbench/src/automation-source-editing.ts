@@ -17,6 +17,7 @@ export interface AutomationSourceCommandError {
 export type AutomationSourceCommand =
   | GraphSourceCommand
   | { type: 'SET_AUTOMATION_INPUTS'; inputs: AutomationSource['inputs'] }
+  | { type: 'SET_AUTOMATION_POLICY'; policy: AutomationSource['policy'] }
   | { type: 'DELETE_STEP'; nodeId: string }
   | { type: 'MOVE_STEP'; nodeId: string; direction: 'up' | 'down' }
   | { type: 'INSERT'; item: WorkbenchAutomationInsertItem; target: AutomationInsertTarget }
@@ -686,6 +687,11 @@ export function applyAutomationSourceCommand(
 ): AutomationSourceCommandResult {
   if (command.type.startsWith('GRAPH_')) return applyGraphSourceCommand(source, command as GraphSourceCommand)
   switch (command.type) {
+    case 'SET_AUTOMATION_POLICY': {
+      if (JSON.stringify(source.policy) === JSON.stringify(command.policy)) return { source }
+      const { policy: _policy, ...rest } = source
+      return { source: command.policy === undefined ? rest : { ...rest, policy: structuredClone(command.policy) } }
+    }
     case 'SET_AUTOMATION_INPUTS': {
       const { inputs: _inputs, ...rest } = source
       return { source: command.inputs === undefined ? rest : { ...rest, inputs: structuredClone(command.inputs) } }

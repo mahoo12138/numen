@@ -416,6 +416,25 @@ export const coreMigrations: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 18,
+    name: 'durable-run-admission',
+    up(database) {
+      database.exec(`
+        CREATE TABLE run_admissions (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
+          max_active INTEGER CHECK (max_active IS NULL OR (
+            typeof(max_active) = 'integer' AND max_active > 0 AND max_active <= 9007199254740991
+          )),
+          overflow TEXT NOT NULL CHECK (overflow IN ('queue', 'drop', 'replace')),
+          namespace TEXT NOT NULL CHECK (namespace IN ('formal', 'test')),
+          replacement_requested INTEGER NOT NULL DEFAULT 0 CHECK (replacement_requested IN (0, 1))
+        );
+        CREATE INDEX runs_admission_group_idx ON runs(automation_id, group_key, status);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(

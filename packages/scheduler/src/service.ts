@@ -9,6 +9,7 @@ import {
   isNumenValue,
   isResourceRef,
   type Attempt,
+  type AutomationSource,
   type AutomationExecutionSnapshot,
   type CancellationReason,
   type ContractSnapshotCapability,
@@ -143,6 +144,14 @@ interface RunRow {
 interface RunSummaryRow extends RunRow {
   execution_count: number
   attempt_count: number
+}
+
+interface AdmissionRow extends RunRow {
+  sequence: number
+  max_active: number | null
+  overflow: 'queue' | 'drop' | 'replace'
+  namespace: 'formal' | 'test'
+  replacement_requested: number
 }
 
 interface ExecutionRow {
@@ -367,6 +376,10 @@ export class SchedulerService extends Service {
   private dispatchTask: Promise<number> | undefined
   private readonly activeInvocations = new Map<string, ActiveInvocation>()
   private readonly activeExecutionTasks = new Map<string, Promise<void>>()
+  // An abort ends the guarded execution, but an uncooperative Provider may still be
+  // running. Keep its Run's permit until the actual invocation settles locally.
+  private readonly pendingProviders = new Map<Promise<unknown>, string>()
+  private wakeDispatch: (() => void) | undefined
   private readonly pendingRunChanges = new Set<string>()
   private runChangeScheduled = false
   private readonly autoDispatch: boolean
@@ -384,6 +397,7 @@ export class SchedulerService extends Service {
   }
 
   async *[Service.init]() {
+    this.recoverAdmissions()
     this.recoverCancellations()
     this.recoverInterruptedWork()
     this.recoverStructuredScopes()
@@ -399,6 +413,7 @@ export class SchedulerService extends Service {
     }
     yield () => {
       this.ready = false
+      this.wakeDispatch?.()
       if (timer) clearInterval(timer)
     }
   }
@@ -501,6 +516,7 @@ export class SchedulerService extends Service {
             id, automation_id, revision_id, status, trigger_json, input_json, created_at
           ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
         `).run(acceptedRunId, automationId, snapshot.id, JSON.stringify(acceptedTrigger), JSON.stringify(resolvedInput), now)
+        this.freezeAdmission(acceptedRunId, snapshot.source, acceptedTrigger, resolvedInput, 'test')
         this.ctx.database.db.prepare(`
           INSERT INTO manual_run_requests (request_id, content_hash, run_id) VALUES (?, ?, ?)
         `).run(requestId, contentHash, acceptedRunId)
@@ -568,6 +584,7 @@ export class SchedulerService extends Service {
           id, automation_id, revision_id, status, trigger_json, input_json, created_at
         ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
       `).run(acceptedRunId, automationId, revision.id, JSON.stringify(trigger), JSON.stringify(resolvedInput), now)
+      this.freezeAdmission(acceptedRunId, revision.source, trigger, resolvedInput, target.mode === 'manual' ? 'formal' : 'test')
       if (requestId !== undefined) {
         this.ctx.database.db.prepare(`
           INSERT INTO manual_run_requests (request_id, content_hash, run_id) VALUES (?, ?, ?)
@@ -631,6 +648,7 @@ export class SchedulerService extends Service {
           id, automation_id, revision_id, status, trigger_json, input_json, created_at
         ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
       `).run(runId, binding.automationId, binding.revisionId, JSON.stringify(emission.data), JSON.stringify(resolvedInput), acceptedAt)
+      this.freezeAdmission(runId, revision.source, emission.data, resolvedInput, 'formal')
       this.ctx.database.db.prepare(`
         INSERT INTO trigger_events (
           id, automation_id, revision_id, activation_generation, trigger_id,
@@ -681,6 +699,8 @@ export class SchedulerService extends Service {
     })
     const cancellationReason = (this.getRun(runId)?.cancelReason as CancellationReason | undefined) ?? reason
     this.propagateCancellation(runId, cancellationReason)
+    this.wakeDispatch?.()
+    if (this.autoDispatch) this.kick()
     return this.getRun(runId)!
   }
 
@@ -986,7 +1006,10 @@ export class SchedulerService extends Service {
   }
 
   dispatchUntilIdle(maxTransitions = 1000): Promise<number> {
-    if (this.dispatchTask) return this.dispatchTask
+    if (this.dispatchTask) {
+      this.wakeDispatch?.()
+      return this.dispatchTask
+    }
     const task = this.runDispatchLoop(maxTransitions)
     this.dispatchTask = task.finally(() => {
       this.dispatchTask = undefined
@@ -996,6 +1019,7 @@ export class SchedulerService extends Service {
 
   private kick(): void {
     if (!this.ready) return
+    this.wakeDispatch?.()
     queueMicrotask(() => {
       this.dispatchUntilIdle().catch(error => this.ctx.logger('scheduler').error(error))
     })
@@ -1003,7 +1027,7 @@ export class SchedulerService extends Service {
 
   private async runDispatchLoop(maxTransitions: number): Promise<number> {
     let transitions = 0
-    while (transitions < maxTransitions) {
+    while (this.ready && transitions < maxTransitions) {
       let progressed = false
       const cancelled = this.reconcileCancellations()
       const resumed = this.resumeDueTimers()
@@ -1029,12 +1053,15 @@ export class SchedulerService extends Service {
         transitions += executions.length
         progressed = true
       }
-      if (this.activeExecutionTasks.size) {
-        await Promise.race(this.activeExecutionTasks.values())
-        progressed = true
-      }
-      if (!progressed) return transitions
+      // Drain admissions and runnable work before awaiting a long invocation.
+      // New accepted Runs can wake this same loop while a Provider is pending.
+      if (progressed) continue
+      if (!this.activeExecutionTasks.size) return transitions
+      const wake = new Promise<void>(resolve => { this.wakeDispatch = resolve })
+      try { await Promise.race([...this.activeExecutionTasks.values(), wake]) }
+      finally { this.wakeDispatch = undefined }
     }
+    if (!this.ready) return transitions
     throw new Error(`scheduler exceeded ${maxTransitions} transitions without becoming idle`)
   }
 
@@ -1107,30 +1134,167 @@ export class SchedulerService extends Service {
     return executionId
   }
 
-  private admitOneRun(): boolean {
-    const row = this.ctx.database.db.prepare(`
-      SELECT * FROM runs WHERE status = 'QUEUED' ORDER BY created_at, id LIMIT 1
-    `).get() as RunRow | undefined
-    if (!row) return false
-    const revision = this.ctx.automations.getExecutionSnapshot(row.revision_id)
-    if (!revision) {
-      this.failQueuedRun(row.id, { code: 'REVISION_MISSING', revisionId: row.revision_id })
-      return true
+  /** Runs inside the same immediate transaction as acceptance and its receipt. */
+  private freezeAdmission(
+    runId: string, source: AutomationSource, trigger: NumenValue,
+    input: Record<string, NumenValue>, namespace: 'formal' | 'test',
+  ): void {
+    const policy = source.policy
+    let groupKey = 'ungrouped'
+    try {
+      if (policy !== undefined && (!policy || typeof policy !== 'object' || Array.isArray(policy))) throw new Error()
+      if (policy?.maxActive !== undefined && (!Number.isSafeInteger(policy.maxActive) || policy.maxActive < 1)) throw new Error()
+      if (policy?.overflow !== undefined && !['queue', 'drop', 'replace'].includes(policy.overflow)) throw new Error()
+      if (policy?.groupBy !== undefined) {
+        // Published snapshots normally passed compilation. Validate reference roots
+        // again here for pre-migration snapshots and do not fabricate run bindings.
+        const check = (value: unknown): void => {
+          if (!value || typeof value !== 'object') return
+          const expression = value as Record<string, unknown>
+          if (expression.type === 'ref' && (typeof expression.path !== 'string' || !/^(trigger|input)(\.|$)/.test(expression.path))) throw new Error()
+          if (expression.type === 'template' && Array.isArray(expression.parts)) {
+            for (const part of expression.parts) {
+              if (typeof part !== 'string' && (!part || typeof part.ref !== 'string' || !/^(trigger|input)(\.|$)/.test(part.ref))) throw new Error()
+            }
+          }
+          if (expression.type === 'array' && Array.isArray(expression.items)) expression.items.forEach(check)
+          if (expression.type === 'object' && expression.entries && typeof expression.entries === 'object') Object.values(expression.entries).forEach(check)
+          if (expression.type === 'call' && Array.isArray(expression.arguments)) expression.arguments.forEach(check)
+        }
+        check(policy.groupBy)
+        const value = evaluateExpression(policy.groupBy, { trigger, input, run: {}, steps: {}, vars: {}, loop: {}, error: null })
+        groupKey = `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`
+      }
+    } catch {
+      // Neither the group value nor the input/trigger belongs in an error or log.
+      throw new TypeError('Cannot resolve the Run admission policy from trigger and input.')
     }
-    try { assertSupportedSnapshot(revision) } catch (error) {
-      this.failQueuedRun(row.id, errorValue(error))
-      return true
-    }
-    const now = new Date().toISOString()
-    return this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE runs SET status = 'RUNNING', started_at = ? WHERE id = ? AND status = 'QUEUED'
-      `).run(now, row.id)
-      if (!result.changes) return false
-      this.appendEvent(row.id, 'RunStarted', { revisionId: row.revision_id }, now)
-      this.createExecution(row.id, revision.compiledPlan.entry)
-      return true
+    this.ctx.database.db.prepare('UPDATE runs SET group_key = ? WHERE id = ?').run(groupKey, runId)
+    this.ctx.database.db.prepare(`
+      INSERT INTO run_admissions (run_id, max_active, overflow, namespace) VALUES (?, ?, ?, ?)
+    `).run(runId, policy?.maxActive ?? null, policy?.overflow ?? 'queue', namespace)
+  }
+
+  private recoverAdmissions(): void {
+    // Freeze legacy active Runs in their surviving insertion order, once. The
+    // durable sequence remains stable across future VACUUMs and restarts.
+    this.ctx.database.transaction(() => {
+      const rows = this.ctx.database.db.prepare(`
+        SELECT runs.* FROM runs LEFT JOIN run_admissions ON run_admissions.run_id = runs.id
+        WHERE runs.status IN ('QUEUED', 'RUNNING', 'CANCELLING') AND run_admissions.run_id IS NULL
+        ORDER BY runs.created_at, runs.rowid
+      `).all() as RunRow[]
+      for (const row of rows) {
+        const accepted = this.ctx.database.db.prepare(`
+          SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'RunAccepted' ORDER BY sequence LIMIT 1
+        `).get(row.id) as { payload_json: string } | undefined
+        let source: string | undefined
+        try { source = accepted ? parseJson<{ source?: string } | null>(accepted.payload_json)?.source : undefined } catch { /* Legacy receipts may be unavailable. */ }
+        const identity = this.ctx.database.db.prepare('SELECT purpose FROM automation_revisions WHERE id = ?').get(row.revision_id) as { purpose: string } | undefined
+        const namespace = identity?.purpose === 'draft-test' || source === 'draft-test' || source === 'local-test' || source === 'revision-test' ? 'test' : 'formal'
+        try {
+          const snapshot = this.ctx.automations.getExecutionSnapshot(row.revision_id)
+          if (!snapshot) throw new Error()
+          this.freezeAdmission(row.id, snapshot.source, parseJson(row.trigger_json), parseJson(row.input_json), namespace)
+        } catch {
+          if (row.status === 'QUEUED') {
+            this.failQueuedRun(row.id, { code: 'ADMISSION_RECOVERY_FAILED', message: 'Cannot recover the Run admission policy.' })
+          } else {
+            // Unknown legacy groups must count against every group in this scope;
+            // mapping them to the ordinary ungrouped key could bypass the limit.
+            this.ctx.database.db.prepare('UPDATE runs SET group_key = NULL WHERE id = ?').run(row.id)
+            this.ctx.database.db.prepare(`
+              INSERT INTO run_admissions (run_id, max_active, overflow, namespace) VALUES (?, NULL, 'queue', ?)
+            `).run(row.id, namespace)
+            this.appendEvent(row.id, 'AdmissionRecoveryFailed', { code: 'ADMISSION_RECOVERY_FAILED' })
+          }
+        }
+      }
     })
+  }
+
+  private admitOneRun(): boolean {
+    const victims: string[] = []
+    const progressed = this.ctx.database.transaction(() => {
+      // Replacement reservations precede ordinary queue entries so the freed slot
+      // goes to the replacement, while existing queued Runs retain their order.
+      const reservations = new Set<string>()
+      const scopeKey = (row: AdmissionRow): string => JSON.stringify([row.automation_id, row.namespace, row.group_key])
+      const pendingRunIds = new Set(this.pendingProviders.values())
+      let cursor = { replacement: 1, sequence: 0 }
+      for (;;) {
+        const candidates = this.ctx.database.db.prepare(`
+          SELECT runs.*, run_admissions.* FROM runs JOIN run_admissions ON run_admissions.run_id = runs.id
+          WHERE runs.status = 'QUEUED' AND (replacement_requested < ? OR (replacement_requested = ? AND sequence > ?))
+          ORDER BY replacement_requested DESC, sequence LIMIT 64
+        `).all(cursor.replacement, cursor.replacement, cursor.sequence) as AdmissionRow[]
+        if (!candidates.length) return false
+        for (const row of candidates) {
+          cursor = { replacement: row.replacement_requested, sequence: row.sequence }
+          const scope = scopeKey(row)
+          const reserved = reservations.has(scope)
+          // A finite drop must be decided now, not kept until a replacement ends.
+          // An unlimited policy does not participate in capacity reservations.
+          if (reserved && row.max_active !== null && row.overflow !== 'drop') continue
+          if (row.replacement_requested) reservations.add(scope)
+          const revision = this.ctx.automations.getExecutionSnapshot(row.revision_id)
+          if (!revision) {
+            this.failQueuedRun(row.id, { code: 'REVISION_MISSING', revisionId: row.revision_id })
+            return true
+          }
+          try { assertSupportedSnapshot(revision) } catch (error) {
+            this.failQueuedRun(row.id, errorValue(error))
+            return true
+          }
+          const now = new Date().toISOString()
+          if (row.max_active !== null) {
+            const active = this.ctx.database.db.prepare(`
+              SELECT runs.*, run_admissions.* FROM runs JOIN run_admissions ON run_admissions.run_id = runs.id
+              WHERE runs.automation_id = ? AND namespace = ? AND (group_key = ? OR group_key IS NULL)
+                AND runs.started_at IS NOT NULL
+                AND (runs.status IN ('RUNNING', 'CANCELLING') OR runs.id IN (SELECT value FROM json_each(?)))
+              ORDER BY runs.started_at, sequence
+            `).all(row.automation_id, row.namespace, row.group_key, JSON.stringify([...pendingRunIds])) as AdmissionRow[]
+            if (active.length >= row.max_active || reserved) {
+              if (row.overflow === 'queue') continue
+              if (row.overflow === 'drop') {
+                this.ctx.database.db.prepare(`
+                  UPDATE runs SET status = 'CANCELLED', cancel_reason = 'OVERFLOW', finished_at = ? WHERE id = ? AND status = 'QUEUED'
+                `).run(now, row.id)
+                this.appendEvent(row.id, 'RunDropped', { reason: 'OVERFLOW', maxActive: row.max_active }, now)
+                this.appendEvent(row.id, 'RunCancelled', { reason: 'OVERFLOW' }, now)
+                return true
+              }
+              // Choose victims only once. A later unlimited Revision may enter
+              // while cancellation drains; it must not become an extra victim.
+              if (row.replacement_requested) continue
+              // Cancellation already in progress will free capacity. Do not cancel
+              // additional survivors while waiting for those Providers to settle.
+              const closing = active.filter(run => run.status !== 'RUNNING').length
+              const needed = Math.max(0, active.length - row.max_active + 1 - closing)
+              victims.push(...active.filter(run => run.status === 'RUNNING').slice(0, needed).map(run => run.id))
+              this.ctx.database.db.prepare('UPDATE run_admissions SET replacement_requested = 1 WHERE run_id = ?').run(row.id)
+              this.appendEvent(row.id, 'RunReplacementRequested', { maxActive: row.max_active }, now)
+              for (const runId of victims) {
+                this.ctx.database.db.prepare(`UPDATE runs SET status = 'CANCELLING', cancel_reason = 'REPLACED' WHERE id = ? AND status = 'RUNNING'`).run(runId)
+                this.appendEvent(runId, 'RunCancellationRequested', { reason: 'REPLACED', replacementRunId: row.id }, now)
+              }
+              return true
+            }
+          }
+          const result = this.ctx.database.db.prepare(`
+            UPDATE runs SET status = 'RUNNING', started_at = ? WHERE id = ? AND status = 'QUEUED'
+          `).run(now, row.id)
+          if (!result.changes) continue
+          this.appendEvent(row.id, 'RunStarted', { revisionId: row.revision_id }, now)
+          this.createExecution(row.id, revision.compiledPlan.entry)
+          return true
+        }
+      }
+    })
+    // Abort signals can invoke third-party listeners: never run them in the DB transaction.
+    for (const runId of victims) this.propagateCancellation(runId, 'REPLACED')
+    return progressed
   }
 
   private failQueuedRun(runId: string, error: NumenValue): void {
@@ -1413,7 +1577,7 @@ export class SchedulerService extends Service {
           connections,
           signal: controller.signal,
           idempotencyKey: attemptId,
-        })), controller, timeoutMs)
+        })), controller, timeoutMs, execution.runId)
       const validatedOutput = status.definition.output(output)
       if (!isNumenValue(validatedOutput)) throw new Error('capability output is not a Numen value')
       if (this.completeInvocation(invocation, attemptId, instruction.next, validatedOutput)) {
@@ -1441,6 +1605,7 @@ export class SchedulerService extends Service {
     invoke: () => Promise<T>,
     controller: AbortController,
     timeoutMs?: number,
+    runId?: string,
   ): Promise<T> {
     let timer: NodeJS.Timeout | undefined
     let onAbort: (() => void) | undefined
@@ -1462,7 +1627,20 @@ export class SchedulerService extends Service {
       timer.unref()
     }
     try {
-      return await Promise.race([Promise.resolve().then(invoke), aborted])
+      const invocation = Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw controller.signal.reason
+        return invoke()
+      })
+      if (runId) {
+        this.pendingProviders.set(invocation, runId)
+        const settled = () => {
+          this.pendingProviders.delete(invocation)
+          this.wakeDispatch?.()
+          if (this.autoDispatch) this.kick()
+        }
+        void invocation.then(settled, settled)
+      }
+      return await Promise.race([invocation, aborted])
     } finally {
       if (timer) clearTimeout(timer)
       if (onAbort) controller.signal.removeEventListener('abort', onAbort)

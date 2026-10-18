@@ -175,8 +175,8 @@ function modeExpression(
   return value === undefined ? undefined : { type: 'literal', value }
 }
 
-function fieldDescription(field: WorkbenchAutomationInputField, mode: ValueMode): string | undefined {
-  if (mode === 'reference') return t('workbench.inspector.referenceHelp')
+function fieldDescription(field: WorkbenchAutomationInputField, mode: ValueMode, referenceHelp?: string): string | undefined {
+  if (mode === 'reference') return referenceHelp ?? t('workbench.inspector.referenceHelp')
   if (mode === 'template') return t('workbench.inspector.templateHelp')
   if (mode === 'expression') return t('workbench.inspector.expressionHelp')
   if (mode === 'object' || mode === 'array') return t('workbench.collection.help')
@@ -198,6 +198,7 @@ export interface ValueExpressionFieldProps {
   source?: AutomationSource
   variableCatalog?: WorkbenchAutomationVariableCatalog
   variables?: MagicVariableCandidate[]
+  referenceHelp?: string
   focusRequest?: number
   depth?: number
   discardEpoch?: number
@@ -225,7 +226,7 @@ function useExpressionDraft(props: Readonly<ValueExpressionFieldProps>, value: (
   }
 }
 
-const ReferenceEditor = defineSetupComponent<ValueExpressionFieldProps>('ReferenceEditor', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
+const ReferenceEditor = defineSetupComponent<ValueExpressionFieldProps>('ReferenceEditor', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'referenceHelp', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
   const draft = useExpressionDraft(props, () => props.expression?.type === 'ref' ? props.expression.path : 'trigger.value', text => referencePattern.test(text.trim()))
   const localError = ref<string>()
   const problemId = inputProblemId(props.nodeId, props.field.name)
@@ -271,7 +272,7 @@ const ReferenceEditor = defineSetupComponent<ValueExpressionFieldProps>('Referen
   }
 })
 
-const TemplateEditor = defineSetupComponent<ValueExpressionFieldProps>('TemplateEditor', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
+const TemplateEditor = defineSetupComponent<ValueExpressionFieldProps>('TemplateEditor', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'referenceHelp', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
   const draft = useExpressionDraft(props, () => props.expression?.type === 'template' ? printAutomationTemplate(props.expression) : '', text => { try { parseAutomationTemplate(text); return true } catch { return false } })
   const localError = ref<string>()
   const textareaRef = ref<HTMLTextAreaElement>()
@@ -410,6 +411,8 @@ function renderCallExpression(props: Readonly<CallExpressionProps>) {
                 {...(props.schemaUI ? { schemaUI: props.schemaUI } : {})}
                 {...(props.source ? { source: props.source } : {})}
                 {...(props.variableCatalog ? { variableCatalog: props.variableCatalog } : {})}
+                {...(props.variables ? { variables: props.variables } : {})}
+                {...(props.referenceHelp ? { referenceHelp: props.referenceHelp } : {})}
                 {...(argumentExpression ? { expression: argumentExpression } : {})}
               />
               {definition.variadic && index >= definition.arguments.length ? (
@@ -447,14 +450,20 @@ function renderCallExpression(props: Readonly<CallExpressionProps>) {
 }
 
 const CallExpressionEditor = defineSetupComponent<CallExpressionProps>('CallExpressionEditor',
-  ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'focusRequest', 'depth', 'discardEpoch', 'onDraftStateChange', 'confirmDiscard', 'onChange'],
+  ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'referenceHelp', 'focusRequest', 'depth', 'discardEpoch', 'onDraftStateChange', 'confirmDiscard', 'onChange'],
   props => () => renderCallExpression(props))
 
 function renderValueExpressionField(props: Readonly<ValueExpressionFieldProps>): VNodeChild {
   const mode = valueExpressionMode(props.expression)
   const problemId = inputProblemId(props.nodeId, props.field.name)
   const inputId = `${props.nodeId}-input-${props.field.name}`
-  const variables = props.variables ?? (props.source && props.variableCatalog
+  const variables = props.variables?.map(variable => {
+    // A supplied scope also applies to nested Call arguments, whose type may be narrower.
+    const { conversion: _conversion, ...candidate } = variable
+    if (mode === 'template' || targetValueTypes(props.field).has(variable.valueType)) return { ...candidate, compatibility: 'direct' as const }
+    if (props.field.type === 'string') return { ...candidate, compatibility: 'conversion' as const, conversion: 'core:to-string' as const }
+    return { ...candidate, unavailableReason: 'type-mismatch' as const }
+  }) ?? (props.source && props.variableCatalog
     ? projectMagicVariables({
         source: props.source,
         nodeId: props.nodeId,
@@ -495,7 +504,7 @@ function renderValueExpressionField(props: Readonly<ValueExpressionFieldProps>):
   } else {
     editor = <div class="inspector-schema-notice"><AlertCircle size={15} /><span>{t('workbench.noLiteralRendererIsRegisteredFor')}{props.field.role ?? props.field.type}{t('workbench.theSourceValueIsPreserved')}</span></div>
   }
-  const description = fieldDescription(props.field, mode)
+  const description = fieldDescription(props.field, mode, props.referenceHelp)
   return <FieldShell
     canEdit={props.canEdit}
     field={props.field}
@@ -577,7 +586,7 @@ const FieldShell = defineSetupComponent<FieldShellProps>('FieldShell', ['field',
   }
 })
 
-export const ValueExpressionField = defineSetupComponent<ValueExpressionFieldProps>('ValueExpressionField', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
+export const ValueExpressionField = defineSetupComponent<ValueExpressionFieldProps>('ValueExpressionField', ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'referenceHelp', 'focusRequest', 'depth', 'onDraftStateChange', 'confirmDiscard', 'onChange'], props => {
   const revision = useSchemaRevision(() => props.schemaUI)
   const draft = useAutomationFieldDraft(() => props.nodeId, () => `input.${props.field.name}`)
   return () => {

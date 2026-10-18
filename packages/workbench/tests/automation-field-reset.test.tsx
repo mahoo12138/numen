@@ -2,7 +2,8 @@ import { createRenderer, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { coreSchemaLiteralRenderers, JsonLiteralEditor, NumberLiteralEditor } from '@numenjs/components'
 import type { SchemaUIResolver } from '@numenjs/webui/schema-ui'
-import type { InvocationPolicy, ValueExpr } from '@numenjs/core'
+import type { AutomationSource, InvocationPolicy, ValueExpr } from '@numenjs/core'
+import { AutomationAdmissionSettings } from '../src/AutomationAdmissionSettings.js'
 import { AutomationLiteralField } from '../src/AutomationLiteralField.js'
 import { ValueExpressionField } from '../src/ValueExpressionEditor.js'
 import { ExecutionPolicyFields } from '../src/ExecutionPolicyFields.js'
@@ -144,6 +145,44 @@ describe('collection member draft protection', () => {
 })
 
 describe('explicit local field discard', () => {
+  it('protects invalid concurrency input when grouping is removed, then restores the saved limit on confirmed discard', async () => {
+    vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
+    vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
+    const confirm = vi.fn(() => false), session = createAutomationInputSession(confirm)
+    const source = ref<AutomationSource>({ triggers: [], inputs: { customer: { type: 'string' } }, flow: { type: 'block', id: 'flow', steps: [] }, policy: { maxActive: 2, overflow: 'replace', groupBy: { type: 'ref', path: 'input.customer' } } })
+    const changed = vi.fn((policy: AutomationSource['policy']) => { source.value = { ...source.value, policy } })
+    const root = element('root')
+    const app = renderer.createApp({ setup() {
+      provideAutomationInputSession(session)
+      return () => h(AutomationAdmissionSettings, { source: source.value, canEdit: true, problems: [], schemaUI, onChange: changed })
+    } })
+    app.mount(root)
+    const limit = () => matching(root, node => node.props.id === 'automation-policy-maxActive')!
+    const remove = () => matching(root, node => node.type === 'button' && textContent(node) === 'Remove grouping')!
+    try {
+      limit().props.onInput({ target: { value: '0' } }); limit().props.onBlur()
+      await nextTick()
+      expect(session.hasInvalid).toBe(true)
+      remove().props.onClick()
+      await nextTick()
+      expect(changed).not.toHaveBeenCalled()
+      expect(limit().props.value).toBe('0')
+      expect(source.value.policy?.groupBy).toEqual({ type: 'ref', path: 'input.customer' })
+      confirm.mockReturnValue(true)
+      remove().props.onClick()
+      await nextTick(); await nextTick()
+      expect(source.value.policy).toEqual({ maxActive: 2, overflow: 'replace' })
+      expect(source.value.inputs).toEqual({ customer: { type: 'string' } })
+      expect(limit().props.value).toBe('2')
+      expect(session.hasUncommitted).toBe(false)
+      expect(changed).toHaveBeenCalledTimes(1)
+      limit().props.onInput({ target: { value: '' } }); limit().props.onBlur()
+      await nextTick()
+      expect(source.value.policy).toEqual({ overflow: 'replace' })
+      expect(session.hasUncommitted).toBe(false)
+    } finally { app.unmount() }
+  })
+
   it('keeps an invalid retry delay and policy when removing retry is cancelled, then removes only retry on confirmation', async () => {
     const confirm = vi.fn(() => false)
     const session = createAutomationInputSession(confirm)

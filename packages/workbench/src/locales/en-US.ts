@@ -1,7 +1,9 @@
 import { graphFocusEnUS } from './graph-focus.js'
 import { localTestEnUS } from './local-test.js'
 import { readonlyGraphEnUS } from './readonly-graph.js'
+import { admissionEnUS } from './admission.js'
 export const enUS = {
+  ...admissionEnUS,
   ...readonlyGraphEnUS,
   ...localTestEnUS,
   "workbench.graph.conversionPreview": "Preview as Graph",

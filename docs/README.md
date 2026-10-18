@@ -78,6 +78,7 @@
 - [27. 官方基础插件：数据、日期时间与 Webhook](27-official-integrations.md)
 - [28. 官方生态对照、平台差距与优先级](28-ecosystem-comparison.md)
 - [29. 官方消息、通知与 CSV 插件](29-official-messaging-integrations.md)
+- [30. 自动化运行并发与持久准入](30-run-admission.md)
 - [N0–N4 整体验收与本地公共包消费检查（2026-10-10）](verification/n0-n4-acceptance-2026-10-10.md)
 - [N2-01 固定快照查看验收](verification/version-workspace-2026-10-08.md)
 - [N2-02 固定版本语义比较验收](verification/semantic-comparison-2026-10-08.md)

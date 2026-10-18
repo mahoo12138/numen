@@ -1065,6 +1065,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .step-edit-actions button:disabled { opacity: .45; cursor: default; }
 .step-edit-actions p { flex-basis: 100%; margin: 2px 0 0; color: var(--wb-muted); font-size: 11px; line-height: 1.4; }
 
+.automation-settings { overflow: auto; min-height: 0; }
+.automation-settings > .automation-input-settings { overflow: visible; }
+.automation-admission-settings { padding: 24px 28px; border-bottom: 1px solid var(--wb-border); }
+.automation-admission-settings > * { max-width: 640px; }
+.automation-admission-settings h2 { margin: 0 0 12px; font-size: 16px; }
+.automation-admission-settings h3 { margin: 0 0 8px; font-size: 13px; }
+.automation-admission-settings .schema-field { margin: 18px 0; }
+.automation-admission-settings .schema-field-row { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+.automation-admission-settings .schema-field-label { display: block; margin-bottom: 7px; padding: 0; }
+.automation-admission-settings .inspector-field-help, .automation-admission-settings .inspector-field-error { margin: 6px 0 0; }
+.automation-admission-group { padding-block: 8px; }
 .automation-input-settings, .automation-manual-run { padding: 24px 28px; overflow: auto; min-height: 0; }
 .automation-input-settings h2, .automation-manual-run h2 { margin: 0 0 12px; font-size: 16px; }
 .automation-input-settings > *, .automation-manual-run > * { max-width: 640px; }
@@ -1095,7 +1106,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .draft-test-result { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; padding: 12px 28px; color: var(--wb-accent-strong); overflow-wrap: anywhere; }
 .automation-draft-test .activation-help { overflow-wrap: anywhere; }
 @media (max-width: 680px) {
-  .automation-input-settings, .automation-manual-run { padding: 18px 16px; }
+  .automation-input-settings, .automation-manual-run, .automation-admission-settings { padding: 18px 16px; }
   .automation-input-metadata { grid-template-columns: minmax(0, 1fr) 100px; }
   .automation-input-metadata .automation-input-checkbox { grid-column: 1 / -1; }
 }
