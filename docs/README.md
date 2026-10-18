@@ -1,5 +1,7 @@
 # Numen Architecture Documentation
 
+面向使用者的入门、集成和插件开发文档现维护在 [`website/`](../website/README.md)，在仓库根目录运行 `pnpm docs:dev` 查看。本文档集继续保留架构决策与工程记录，其中规划内容不代表已实现功能。
+
 > 状态：Architecture V1 Draft
 >
 > 框架名称：**Numen**

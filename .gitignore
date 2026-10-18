@@ -11,3 +11,7 @@ test-results/
 !.env.example
 examples/*/dist/
 artifacts/npm/
+
+# VitePress documentation workspace
+website/.vitepress/cache/
+website/.vitepress/dist/

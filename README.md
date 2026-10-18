@@ -19,6 +19,21 @@ See [M3 verification and remaining Draft snapshot scope](docs/verification/edito
 - Node.js 22+
 - pnpm 10+
 
+## Documentation website
+
+The VitePress workspace in [`website/`](website/README.md) includes a landing page,
+Chinese getting-started guides, official integration examples, and plugin development
+documentation. It builds independently of the runtime:
+
+```bash
+pnpm docs:dev
+pnpm docs:build
+pnpm docs:test
+```
+
+See [the documentation workspace guide](website/README.md) for preview, subpath
+deployment and browser validation. Architecture decisions remain in `docs/`.
+
 ## Development
 
 ```bash

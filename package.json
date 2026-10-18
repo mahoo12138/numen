@@ -36,7 +36,11 @@
     "version:packages": "changeset version && pnpm install --lockfile-only",
     "release:pack": "node scripts/pack-packages.mjs",
     "release:check": "pnpm release:pack && node scripts/verify-packages.mjs",
-    "release:publish": "pnpm release:verify && pnpm release:check && changeset publish"
+    "release:publish": "pnpm release:verify && pnpm release:check && changeset publish",
+    "docs:dev": "pnpm --filter @numenjs/docs dev",
+    "docs:build": "pnpm --filter @numenjs/docs build",
+    "docs:preview": "pnpm --filter @numenjs/docs preview",
+    "docs:test": "pnpm --filter @numenjs/docs test"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
