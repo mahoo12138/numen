@@ -37,6 +37,7 @@ async function main(): Promise<void> {
   }
   const app = createApp(() => (
     <WorkbenchShell
+      extensions={context.webuiExtensions}
       localeService={context.webuiLocale}
       router={context.webuiRouter}
       schemaUI={context.schemaUI}

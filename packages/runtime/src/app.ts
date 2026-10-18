@@ -13,6 +13,12 @@ import { httpSocksPlugin, OutboundHttpService } from '@numenjs/http'
 import demoIntegrationPlugin from '@numenjs/integration-demo'
 import httpIntegrationPlugin from '@numenjs/integration-http'
 import scheduleIntegrationPlugin from '@numenjs/integration-schedule'
+import dataIntegrationPlugin from '@numenjs/integration-data'
+import datetimeIntegrationPlugin from '@numenjs/integration-datetime'
+import webhookIntegrationPlugin from '@numenjs/integration-webhook'
+import csvIntegrationPlugin from '@numenjs/integration-csv'
+import mqttIntegrationPlugin from '@numenjs/integration-mqtt'
+import smtpIntegrationPlugin from '@numenjs/integration-smtp'
 import { SchedulerService } from '@numenjs/scheduler'
 import { TriggerService } from '@numenjs/triggers'
 import workbenchPlugin, { legacyWorkbenchBuiltins } from '@numenjs/workbench/plugin'
@@ -52,6 +58,12 @@ const hostBuiltins = {
   demo: demoIntegrationPlugin,
   httpIntegration: httpIntegrationPlugin,
   schedule: scheduleIntegrationPlugin,
+  data: dataIntegrationPlugin,
+  datetime: datetimeIntegrationPlugin,
+  webhook: webhookIntegrationPlugin,
+  csv: csvIntegrationPlugin,
+  mqtt: mqttIntegrationPlugin,
+  smtp: smtpIntegrationPlugin,
   automations: AutomationService,
   scheduler: SchedulerService,
   triggers: TriggerService,

@@ -66,6 +66,24 @@
     },
     {
       "path": "examples/components-plugin"
+    },
+    {
+      "path": "packages/integration-data"
+    },
+    {
+      "path": "packages/integration-datetime"
+    },
+    {
+      "path": "packages/integration-webhook"
+    },
+    {
+      "path": "packages/integration-csv"
+    },
+    {
+      "path": "packages/integration-mqtt"
+    },
+    {
+      "path": "packages/integration-smtp"
     }
   ]
 }

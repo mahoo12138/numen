@@ -1,3 +1,5 @@
+import { provideTriggerDetails } from './trigger-details.js'
+import type { BrowserExtensionRegistry } from '@numenjs/webui/extensions'
 import { PanelResizeHandle } from './PanelResizeHandle.js'
 import { provideWorkbenchLayout } from './workbench-layout.js'
 import { Button, SelectMenu, ResizeHandle } from '@numenjs/components'
@@ -43,6 +45,7 @@ export interface WorkbenchRouter {
 }
 
 export interface WorkbenchShellProps {
+  extensions?: BrowserExtensionRegistry
   localeService?: BrowserLocaleService
   router?: WorkbenchRouter
   consoleClient?: WorkbenchConsoleClient
@@ -69,7 +72,8 @@ function NotFoundPageChrome({ pathname }: { pathname: string }) {
   )
 }
 
-export const WorkbenchShell = defineSetupComponent<WorkbenchShellProps>('WorkbenchShell', ['localeService', 'router', 'consoleClient', 'schemaUI', 'standalonePages'], props => {
+export const WorkbenchShell = defineSetupComponent<WorkbenchShellProps>('WorkbenchShell', ['extensions', 'localeService', 'router', 'consoleClient', 'schemaUI', 'standalonePages'], props => {
+  provideTriggerDetails(() => props.extensions)
   const language = provideWorkbenchI18n(() => props.localeService)
   const { t } = language
   watchEffect(() => {

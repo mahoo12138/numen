@@ -16,6 +16,12 @@ COPY packages/database/package.json packages/database/package.json
 COPY packages/http/package.json packages/http/package.json
 COPY packages/i18n/package.json packages/i18n/package.json
 COPY packages/logging/package.json packages/logging/package.json
+COPY packages/integration-data/package.json packages/integration-data/package.json
+COPY packages/integration-datetime/package.json packages/integration-datetime/package.json
+COPY packages/integration-webhook/package.json packages/integration-webhook/package.json
+COPY packages/integration-csv/package.json packages/integration-csv/package.json
+COPY packages/integration-mqtt/package.json packages/integration-mqtt/package.json
+COPY packages/integration-smtp/package.json packages/integration-smtp/package.json
 COPY packages/integration-demo/package.json packages/integration-demo/package.json
 COPY packages/integration-http/package.json packages/integration-http/package.json
 COPY packages/integration-schedule/package.json packages/integration-schedule/package.json

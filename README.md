@@ -49,6 +49,20 @@ pnpm numen doctor
 pnpm numen start --safe
 ```
 
+## Official foundation integrations
+
+The default runtime includes Data (JSON parsing/serialization, field merge and
+stable deduplication), Date & Time (explicit timestamps, formatting, calendar
+arithmetic and differences), and authenticated JSON Webhook triggers. Each
+operation has its own versioned Capability. Webhooks acknowledge only after a
+Run is durably accepted and can use delivery IDs for deduplication.
+See [configuration and the complete Webhook → data → date example](docs/27-official-integrations.md).
+
+The runtime also includes MQTT push triggers and publishing, authenticated TLS SMTP
+email, and CSV parsing/export. Configure credentials and connections through the
+existing Schema forms. See [the MQTT → CSV → email guide](docs/29-official-messaging-integrations.md)
+and [ecosystem comparison and remaining platform gaps](docs/28-ecosystem-comparison.md).
+
 ## Languages
 
 Workbench supports English and Simplified Chinese. Use the language selector in

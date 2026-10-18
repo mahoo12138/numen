@@ -23,6 +23,12 @@
     { "path": "../automation" },
     { "path": "../scheduler" },
     { "path": "../triggers" },
-    { "path": "../workbench" }
+    { "path": "../workbench" },
+    { "path": "../integration-data" },
+    { "path": "../integration-datetime" },
+    { "path": "../integration-webhook" },
+    { "path": "../integration-csv" },
+    { "path": "../integration-mqtt" },
+    { "path": "../integration-smtp" }
   ]
 }

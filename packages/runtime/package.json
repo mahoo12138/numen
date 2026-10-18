@@ -32,7 +32,13 @@
     "@numenjs/triggers": "workspace:*",
     "@numenjs/workbench": "workspace:*",
     "cordis": "4.0.0-rc.8",
-    "@numenjs/logging": "workspace:*"
+    "@numenjs/logging": "workspace:*",
+    "@numenjs/integration-data": "workspace:*",
+    "@numenjs/integration-datetime": "workspace:*",
+    "@numenjs/integration-webhook": "workspace:*",
+    "@numenjs/integration-csv": "workspace:*",
+    "@numenjs/integration-mqtt": "workspace:*",
+    "@numenjs/integration-smtp": "workspace:*"
   },
   "devDependencies": {
     "schemastery": "^3.18.0"

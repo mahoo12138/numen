@@ -459,6 +459,7 @@ export const AutomationPageChrome = defineSetupComponent<WorkbenchPageChromeProp
     } catch { if (!controller.signal.aborted) { connectionReturnMessage.value = 'workbench.focus.return.failed'; connectionReturn.value = undefined; connectionProtection.value = false } }
   }
   const inspectorProperties = (): InspectorProps => ({
+    ...(authoring.document ? { automationId: authoring.document.automationId } : {}),
     activeStepId: focusedNodeId.value ? `source:${focusedNodeId.value}` : activeStepId.value,
     open: !!focusedNodeId.value || props.inspectorOpen, canEdit: editable.value && authoring.canEdit,
     ...(localizedCatalogState.value.status === 'READY' ? { catalog: localizedCatalogState.value.data } : {}),

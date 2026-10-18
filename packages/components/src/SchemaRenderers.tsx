@@ -84,6 +84,7 @@ function textLiteralEditor(name: string) {
     }
     return () => {
       const isJson = props.field.type === 'json'
+      const multiline = props.field.role === 'numen/multiline'
       const duration = props.field.role === 'numen/duration-ms'
       const dateTime = props.field.role === 'numen/iso-date-time'
       const number = props.field.type === 'number'
@@ -97,7 +98,9 @@ function textLiteralEditor(name: string) {
         onInput: input,
         onBlur: commit,
       }
-      const editor = isJson ? <Textarea {...attrs} rows={4} placeholder={props.field.required ? t('requiredJsonValue') : t('optionalJsonValue')} /> : <Input {...attrs}
+      const editor = isJson || multiline ? <Textarea {...attrs} rows={4} placeholder={isJson
+        ? props.field.required ? t('requiredJsonValue') : t('optionalJsonValue')
+        : props.field.required ? t('required') : t('optional')} /> : <Input {...attrs}
         {...(duration ? { 'aria-label': t('waitDurationInSeconds') } : dateTime ? { 'aria-label': t('waitUntilDateAndTime') } : {})}
         {...(number ? { inputmode: 'decimal' as const } : {})}
         type={dateTime ? 'datetime-local' : 'text'}
@@ -159,6 +162,7 @@ export interface LiteralRendererDefinition {
 }
 
 export const coreSchemaLiteralRenderers: ReadonlyArray<LiteralRendererDefinition> = [
+  { id: 'numen:schema-multiline', version: 1, role: 'numen/multiline', editor: StringLiteralEditor },
   { id: 'numen:schema-duration-ms', version: 1, role: 'numen/duration-ms', editor: DurationLiteralEditor },
   { id: 'numen:schema-iso-date-time', version: 1, role: 'numen/iso-date-time', editor: IsoDateTimeLiteralEditor },
   { id: 'numen:schema-string', version: 1, type: 'string', editor: StringLiteralEditor },

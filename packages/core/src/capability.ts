@@ -86,6 +86,8 @@ export interface TriggerActivation<Output = NumenValue> {
   connections: ConnectionRuntimeBindings
   signal: AbortSignal
   emit(emission: TriggerEmission<Output>): Promise<TriggerAcceptance>
+  /** Report background health without stopping the subscription. Defaults to READY. */
+  reportStatus?(status: 'READY' | 'ERROR'): void
 }
 
 export interface TriggerProvider<Output = NumenValue> {

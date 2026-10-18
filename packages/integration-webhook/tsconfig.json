@@ -1,0 +1,44 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "jsx": "preserve",
+    "jsxImportSource": "vue"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../connections"
+    },
+    {
+      "path": "../credentials"
+    },
+    {
+      "path": "../integration-data"
+    },
+    {
+      "path": "../console"
+    },
+    {
+      "path": "../components"
+    },
+    {
+      "path": "../workbench"
+    },
+    {
+      "path": "../webui"
+    }
+  ]
+}

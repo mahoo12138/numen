@@ -27,7 +27,10 @@ function enumOptions(schema: Schema): WorkbenchSchemaField['options'] | undefine
   if (schema.type !== 'union' || !schema.list?.length) return
   const values = schema.list.map(item => item.type === 'const' ? item.value : undefined)
   if (values.some(value => !isNumenValue(value))) return
-  return values.map(value => ({ label: String(value), value }))
+  return values.map(value => ({
+    label: typeof value === 'string' && (!value.trim() || /[\r\n\t]/.test(value)) ? JSON.stringify(value) : String(value),
+    value,
+  }))
 }
 
 export function projectSchemaField(name: string, schema: Schema): WorkbenchSchemaField {

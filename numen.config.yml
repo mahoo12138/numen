@@ -33,6 +33,12 @@ plugins:
   demo: {}
   httpIntegration: {}
   schedule: {}
+  data: {}
+  datetime: {}
+  webhook: {}
+  csv: {}
+  mqtt: {}
+  smtp: {}
   automations: {}
   scheduler: {}
   triggers: {}
