@@ -1,3 +1,4 @@
+import { TriggerDetails } from './trigger-details.js'
 import { Textarea, Input, Button, SelectMenu, FormSection as InspectorGroup } from '@numenjs/components'
 import { diagnosticText, t } from './i18n.js'
 import type { AutomationSource, CompileDiagnostic, InvocationPolicy, NumenValue, WaitSource, ValueExpr } from '@numenjs/core'
@@ -27,6 +28,7 @@ export interface InspectorFieldFocus {
 }
 
 export interface InspectorProps {
+  automationId?: string
   activeStepId: string
   open: boolean
   steps?: AutomationStep[]
@@ -133,6 +135,7 @@ function WaitConfiguration({
 }
 
 export function Inspector({
+  automationId,
   activeStepId,
   open,
   steps,
@@ -216,6 +219,7 @@ export function Inspector({
         </>
       ) : trigger && step.sourceId ? (
         <>
+          {automationId ? <TriggerDetails automationId={automationId} trigger={trigger} /> : null}
           {triggerDefinition && !triggerDefinition.providerAvailable ? <p class="inspector-schema-notice" role="status">{t('workbench.inspector.providerUnavailable')}</p> : null}
           {triggerDefinition?.connectionRequirements.length ? (
             <InspectorGroup title={t('workbench.connection3')}>

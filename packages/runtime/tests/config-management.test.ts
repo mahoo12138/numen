@@ -41,10 +41,15 @@ describe('host configuration management', () => {
   it('serializes two clients with CAS, preserves comments, and reconciles a lost response', async () => {
     const { filename, ctx } = await fixture({ 'probe:a': { custom: 'retained' }, 'probe:b': {} })
     const snapshot = await ctx.hostConfig.read()
-    const results = await Promise.allSettled([
-      applyFresh(ctx, { fingerprint: snapshot.fingerprint, operation: { kind: 'setEnabled', id: 'probe-a', enabled: false } }),
-      applyFresh(ctx, { fingerprint: snapshot.fingerprint, operation: { kind: 'setLabel', id: 'probe-b', label: 'Stale edit' } }),
-    ])
+    const requests: HostConfigMutationRequest[] = [
+      { fingerprint: snapshot.fingerprint, operation: { kind: 'setEnabled', id: 'probe-a', enabled: false } },
+      { fingerprint: snapshot.fingerprint, operation: { kind: 'setLabel', id: 'probe-b', label: 'Stale edit' } },
+    ]
+    // Complete both read-only previews first. Filesystem read completion order
+    // is not write submission order; apply() serializes the submitted writes.
+    const previews = await Promise.all(requests.map(request => ctx.hostConfig.preview(request)))
+    const results = await Promise.allSettled(requests.map((request, index) =>
+      ctx.hostConfig.apply({ ...request, previewToken: previews[index]!.previewToken! })))
     expect(results[0].status).toBe('fulfilled')
     expect(results[1]).toMatchObject({ status: 'rejected', reason: { code: 'CONFIG_CONFLICT' } })
     const refreshed = await ctx.hostConfig.read()

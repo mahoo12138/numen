@@ -38,6 +38,9 @@
       "path": "packages/integration-schedule"
     },
     {
+      "path": "packages/integration-run-events"
+    },
+    {
       "path": "packages/credentials"
     },
     {
@@ -66,6 +69,36 @@
     },
     {
       "path": "examples/components-plugin"
+    },
+    {
+      "path": "packages/integration-data"
+    },
+    {
+      "path": "packages/integration-datetime"
+    },
+    {
+      "path": "packages/integration-webhook"
+    },
+    {
+      "path": "packages/integration-csv"
+    },
+    {
+      "path": "packages/integration-mqtt"
+    },
+    {
+      "path": "packages/integration-smtp"
+    },
+    {
+      "path": "packages/integration-github"
+    },
+    {
+      "path": "packages/integration-feishu"
+    },
+    {
+      "path": "packages/integration-rss"
+    },
+    {
+      "path": "packages/trigger-ui"
     }
   ]
 }

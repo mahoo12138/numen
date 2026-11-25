@@ -1,0 +1,27 @@
+{
+  "name": "@numenjs/integration-mqtt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "peerDependencies": { "cordis": "4.0.0-rc.8" },
+  "dependencies": {
+    "@numenjs/core": "workspace:*",
+    "@numenjs/connections": "workspace:*",
+    "@numenjs/credentials": "workspace:*",
+    "@numenjs/integration-data": "workspace:*",
+    "mqtt": "5.16.1",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@numenjs/automation": "workspace:*",
+    "@numenjs/database": "workspace:*",
+    "@numenjs/resources": "workspace:*",
+    "@numenjs/scheduler": "workspace:*",
+    "@numenjs/triggers": "workspace:*",
+    "@numenjs/logging": "workspace:*",
+    "aedes": "1.2.0"
+  }
+}

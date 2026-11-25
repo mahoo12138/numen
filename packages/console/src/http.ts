@@ -6,6 +6,7 @@ import z from 'schemastery'
 import {
   ConsoleAuthenticationError,
   ConsoleAuthenticatorUnavailableError,
+  ConsoleInvalidOutputError,
   ConsoleProcedureKindError,
   ConsoleProcedureNotFoundError,
   ConsoleProcedureError,
@@ -149,6 +150,8 @@ async function handleCall(ctx: Context, request: Request, response: Response): P
       respondError(response, requestId, 409, 'PROCEDURE_KIND_MISMATCH', error.message)
     } else if (error instanceof ConsoleProcedureUnavailableError) {
       respondError(response, requestId, 503, 'PROCEDURE_UNAVAILABLE', error.message)
+    } else if (error instanceof ConsoleInvalidOutputError) {
+      respondError(response, requestId, 500, 'PROCEDURE_INVALID_OUTPUT', error.message, { sideEffects: error.sideEffects })
     } else if (error instanceof ConsoleProcedureError) {
       respondError(response, requestId, error.status, error.code, error.message, error.details)
     } else if (error instanceof z.ValidationError) {

@@ -2,6 +2,7 @@ import { Context, type Logger } from 'cordis'
 import z from 'schemastery'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ConsoleInvalidOutputError,
   ConsoleProcedureKindError,
   ConsoleProcedureError,
   ConsoleProcedureUnavailableError,
@@ -30,6 +31,31 @@ describe('ConsoleService', () => {
     })
     expect(() => new ConsoleProcedureError(500, 'DRAFT_INVALID', 'invalid status')).toThrow('4xx')
     expect(() => new ConsoleProcedureError(409, 'draft-invalid', 'invalid code')).toThrow('uppercase snake case')
+  })
+
+  it('raises a stable error when an Action result violates the output schema', async () => {
+    const root = new Context()
+    await root.plugin(ConsoleService)
+    const action = {
+      id: 'test:invalid-output',
+      version: 1,
+      kind: 'action' as const,
+      title: 'Invalid output',
+      input: z.object({ value: z.string().required() }),
+      output: z.object({ value: z.string().required() }),
+    }
+    root.console.define(root, action)
+    root.console.provideAction(root, action, {
+      action() {
+        return { value: 42 } as never
+      },
+    })
+
+    const error = await root.console.action(action, { value: 'hello' }, request()).catch(caught => caught)
+    expect(error).toBeInstanceOf(ConsoleInvalidOutputError)
+    expect(error).toMatchObject({ sideEffects: 'committed' })
+    expect(error.message).toContain('test:invalid-output')
+    await root.fiber.dispose()
   })
 
   it('validates and invokes versioned Query and Action providers', async () => {

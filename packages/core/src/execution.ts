@@ -38,6 +38,8 @@ export type CancellationReason =
   | 'RECONFIGURED'
   | 'SHUTDOWN'
   | 'CREDENTIAL_ROTATED'
+  | 'OVERFLOW'
+  | 'REPLACED'
 
 export interface Run {
   id: string

@@ -22,7 +22,7 @@
 Cron 不补发停机期间错过的触发；State Trigger、Try/Finally、Resource HTTP 下载、
 Marketplace/Installer 与外部 vault 尚未完成。Plugins/System 页面不表示
 已有完整的插件管理或恢复控制台。Echo 不验证真实 Credential-backed 外部 Integration。
-完整约束见 [STATUS.md](../STATUS.md#known-boundaries)。
+完整约束见 [status snapshot](verification/status-snapshot-2026-10-10.md#known-boundaries)。
 
 ## 2. 发布门禁
 

@@ -45,6 +45,7 @@ async function fixture() {
   workbenchAutomationAuthoringProviderPlugin(root)
   const source: AutomationSource = {
     inputs: { message: { type: 'string', default: 'DEFAULT_PRIVATE_CANARY' } },
+    policy: { maxActive: 2, overflow: 'replace', groupBy: { type: 'ref', path: 'input.message' } },
     triggers: [{ id: 'historical-trigger', capability: { id: 'test:trigger', version: 1 }, config: { token: 'TRIGGER_PRIVATE_CANARY' } }],
     flow: { type: 'block', id: 'historical-root', steps: [
       { type: 'capability', id: 'historical-action', capability: { id: 'test:restoration', version: 1 }, input: { value: { type: 'literal', value: 'ACTION_PRIVATE_CANARY' } } },

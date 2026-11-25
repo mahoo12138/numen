@@ -1,3 +1,5 @@
+import { workbenchAttentionQuery, workbenchAcknowledgeAttentionAction, workbenchReplayPreviewQuery, workbenchStartReplayAction } from './attention-provider.js'
+export { workbenchAttentionProviderPlugin } from './attention-provider.js'
 import { outputSamplesQuery, createOutputSampleAction, importOutputSampleAction, deleteOutputSampleAction, localTestPreviewQuery, startLocalTestAction } from './local-test-provider.js'
 import { workbenchConnectionUsageQuery } from './connection-usage-provider.js'
 import { workbenchAutomationSnapshotQuery } from './automation-snapshot-provider.js'
@@ -147,6 +149,10 @@ export class WorkbenchRuntimeService extends Service {
     ctx.console.define(ctx, workbenchDeleteConnectionAction)
     ctx.console.define(ctx, workbenchSetConnectionEnabledAction)
     ctx.console.define(ctx, workbenchUpdateConnectionAction)
+    ctx.console.define(ctx, workbenchAttentionQuery)
+    ctx.console.define(ctx, workbenchAcknowledgeAttentionAction)
+    ctx.console.define(ctx, workbenchReplayPreviewQuery)
+    ctx.console.define(ctx, workbenchStartReplayAction)
     ctx.console.define(ctx, workbenchHomeOverviewQuery)
     ctx.console.define(ctx, workbenchInvalidationSubscription)
     ctx.console.define(ctx, workbenchRunDetailQuery)

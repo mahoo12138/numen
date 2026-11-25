@@ -181,6 +181,21 @@ export class ConsoleProcedureError extends Error {
   }
 }
 
+/**
+ * Raised when an Action Provider returned a result that does not satisfy the
+ * declared output schema. The provider already ran, so callers must not treat
+ * this like an input rejection and blindly retry the procedure.
+ */
+export class ConsoleInvalidOutputError extends Error {
+  override name = 'ConsoleInvalidOutputError'
+  /** The Action's side effects were already committed before validation failed. */
+  readonly sideEffects = 'committed' as const
+
+  constructor(procedure: string, public readonly cause: unknown) {
+    super(`console action produced an invalid result: ${procedure}`)
+  }
+}
+
 export class ConsoleAuthenticatorUnavailableError extends Error {
   override name = 'ConsoleAuthenticatorUnavailableError'
 }
@@ -311,7 +326,14 @@ export class ConsoleService extends Service {
     withLogContext({ requestId: request.requestId, traceId: request.requestId }, () => request.logger.info('Console action %s', consoleProcedureKey(ref)))
     const output = await withLogContext({ requestId: request.requestId, traceId: request.requestId }, () => provider.action({ input: parsedInput, request }))
     request.signal.throwIfAborted()
-    return entry.definition.output(output) as Output
+    // The provider's side effects are committed at this point. Surface a
+    // schema violation as a stable, distinguishable error instead of letting
+    // the caller mistake it for a retryable input rejection.
+    try {
+      return entry.definition.output(output) as Output
+    } catch (error) {
+      throw new ConsoleInvalidOutputError(consoleProcedureKey(ref), error)
+    }
   }
 
   async subscribe<Input, Event>(

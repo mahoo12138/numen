@@ -55,6 +55,9 @@
     },
     {
       "path": "../database"
+    },
+    {
+      "path": "../trigger-ui"
     }
   ]
 }

@@ -29,6 +29,10 @@
     "./i18n": {
       "types": "./dist/i18n.d.ts",
       "default": "./dist/i18n.js"
+    },
+    "./trigger-details": {
+      "types": "./dist/trigger-details.d.ts",
+      "default": "./dist/trigger-details.js"
     }
   },
   "scripts": {
@@ -49,6 +53,7 @@
     "@numenjs/i18n": "workspace:*",
     "@numenjs/logging": "workspace:*",
     "@numenjs/scheduler": "workspace:*",
+    "@numenjs/trigger-ui": "workspace:*",
     "@numenjs/triggers": "workspace:*",
     "@numenjs/webui": "workspace:*",
     "@vue-flow/core": "1.48.2",

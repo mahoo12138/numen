@@ -78,25 +78,35 @@ healthPlugin.inject = ['server']
 
 export function readinessPlugin(ctx: Context): void {
   ctx.server.get('/api/ready', async (_request, response) => {
+    const database = optionalService(() => ctx.get('database'))
     let databaseReady = false
     let migrationVersion: number | undefined
-    try {
-      const health = ctx.database?.health()
-      databaseReady = health?.ready ?? false
-      migrationVersion = health?.migrationVersion
-    } catch {
-      databaseReady = false
+    if (database) {
+      try {
+        const health = database.health()
+        databaseReady = health.ready
+        migrationVersion = health.migrationVersion
+      } catch {
+        databaseReady = false
+      }
     }
 
+    const capabilities = optionalService(() => ctx.get('capabilities'))
     let statuses: ReturnType<Context['capabilities']['list']> = []
     try {
-      statuses = ctx.capabilities?.list() ?? []
+      statuses = capabilities?.list() ?? []
     } catch {
       statuses = []
     }
-    const capabilitiesReady = !!ctx.capabilities
+    const capabilitiesReady = !!capabilities
+    const connections = optionalService(() => ctx.get('connections'))
+    const credentials = optionalService(() => ctx.get('credentials'))
+    const resources = optionalService(() => ctx.get('resources'))
+    const automations = optionalService(() => ctx.get('automations'))
+    const scheduler = optionalService(() => ctx.get('scheduler'))
+    const triggers = optionalService(() => ctx.get('triggers'))
     const document: ReadinessDocument = {
-      status: databaseReady && capabilitiesReady ? 'ready' : 'not_ready',
+      status: 'not_ready',
       checks: {
         database: {
           ready: databaseReady,
@@ -107,20 +117,53 @@ export function readinessPlugin(ctx: Context): void {
           definitions: statuses.length,
           providers: statuses.filter(status => status.providerAvailable).length,
         },
-        connections: ctx.connections.health(),
-        credentials: ctx.credentials.health(),
-        resources: ctx.resources.health(),
-        automations: {
-          ready: true,
-          count: ctx.automations.count(),
-        },
-        scheduler: ctx.scheduler.health(),
-        triggers: ctx.triggers.health(),
+        connections: connections ? connections.health() : missingConnections(),
+        credentials: credentials ? credentials.health() : missingCredentials(),
+        resources: resources ? resources.health() : missingResources(),
+        automations: automations
+          ? { ready: true, count: automations.count() }
+          : { ready: false, count: 0 },
+        scheduler: scheduler ? scheduler.health() : missingScheduler(),
+        triggers: triggers ? triggers.health() : missingTriggers(),
       },
     }
+    // A missing dependency must stay visible in the document instead of
+    // removing the route, so a failing probe says *which* service is
+    // unavailable rather than returning an empty 404. With every service
+    // present, readiness keeps its original database + capabilities rule.
+    const servicesPresent = !!(connections && credentials && resources && automations && scheduler && triggers)
+    document.status = databaseReady && capabilitiesReady && servicesPresent ? 'ready' : 'not_ready'
     response.status = document.status === 'ready' ? 200 : 503
     response.json(document)
   })
 }
 
-readinessPlugin.inject = ['server', 'database', 'capabilities', 'connections', 'credentials', 'resources', 'automations', 'scheduler', 'triggers']
+function optionalService<T>(resolve: () => T | undefined): T | undefined {
+  try {
+    return resolve()
+  } catch {
+    return undefined
+  }
+}
+
+function missingConnections(): ReadinessDocument['checks']['connections'] {
+  return { ready: false, total: 0, enabled: 0, unavailable: 0, starting: 0, runtimeReady: 0, errors: 0 }
+}
+
+function missingCredentials(): ReadinessDocument['checks']['credentials'] {
+  return { ready: false, encryptionConfigured: false, count: 0, unavailableTypes: 0 }
+}
+
+function missingResources(): ReadinessDocument['checks']['resources'] {
+  return { ready: false, staged: 0, committed: 0, deleting: 0, gone: 0, activeLeases: 0 }
+}
+
+function missingScheduler(): ReadinessDocument['checks']['scheduler'] {
+  return { ready: false, queuedRuns: 0, runnableExecutions: 0, waitingExecutions: 0, blockedExecutions: 0 }
+}
+
+function missingTriggers(): ReadinessDocument['checks']['triggers'] {
+  return { ready: false, desiredSubscriptions: 0, activeSubscriptions: 0, unavailableSubscriptions: 0 }
+}
+
+readinessPlugin.inject = ['server']

@@ -24,6 +24,21 @@ function frozen<T>(value: T): T {
 function getBlock(value: AutomationSource, id: string): BlockSource { return findAutomationControl(value, id) as BlockSource }
 
 describe('explicit Source structure commands', () => {
+  it('edits and clears Automation policy without mutating or replacing inputs and flow', () => {
+    const original = frozen({ ...source(block('root', [wait('pause')])), inputs: { customer: { type: 'string' as const, required: true } } })
+    const policy: NonNullable<AutomationSource['policy']> = { maxActive: 2, overflow: 'replace', groupBy: { type: 'ref', path: 'input.customer' } }
+    const changed = apply(original, { type: 'SET_AUTOMATION_POLICY', policy }).source
+    expect(changed.policy).toEqual(policy)
+    expect(changed.flow).toBe(original.flow)
+    expect(changed.inputs).toBe(original.inputs)
+    expect(changed.triggers).toBe(original.triggers)
+    policy.groupBy = { type: 'literal', value: 'different' }
+    expect(changed.policy?.groupBy).toEqual({ type: 'ref', path: 'input.customer' })
+    expect(original).not.toHaveProperty('policy')
+    expect(apply(changed, { type: 'SET_AUTOMATION_POLICY', policy: changed.policy }).source).toBe(changed)
+    expect(apply(changed, { type: 'SET_AUTOMATION_POLICY', policy: undefined }).source).toEqual(original)
+  })
+
   it('edits and clears invocation policy without mutating input, identity, or other steps', () => {
     const original = frozen(source(block('root', [capability('action', { value: { type: 'ref', path: 'input.value' } }), wait('pause')])))
     const policy = { timeoutMs: 2000, retry: { maxAttempts: 3, backoffMs: 100 } }

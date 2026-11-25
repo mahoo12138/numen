@@ -27,6 +27,18 @@ function definition(
 }
 
 describe('Automation insert catalog projection', () => {
+  it('labels whitespace enum choices without changing their configuration values', () => {
+    const catalog = projectAutomationInsertCatalog([{
+      definition: definition('test:delimited', 'query', 'Delimited text', undefined,
+        z.object({ delimiter: z.union([',', '\t', '', '\r\n']).default(',') })),
+      providerAvailable: true,
+    }], [])
+    expect(catalog.items.at(-1)).toMatchObject({ inputFields: [{ name: 'delimiter', options: [
+      { label: ',', value: ',' }, { label: '"\\t"', value: '\t' },
+      { label: '""', value: '' }, { label: '"\\r\\n"', value: '\r\n' },
+    ] }] })
+  })
+
   it('projects only live plugin Controls and their input fields without compiler functions', async () => {
     const root = new Context()
     await root.plugin(ControlRegistry)

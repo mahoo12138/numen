@@ -24,7 +24,7 @@ function resolveReference(path: string, bindings: EvaluationBindings): NumenValu
   const [root, ...segments] = path.split('.')
   let value: unknown = bindings[root as keyof EvaluationBindings]
   for (const segment of segments) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || !(segment in value)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, segment)) {
       throw new ExpressionEvaluationError(`reference not found: ${path}`)
     }
     value = (value as Record<string, unknown>)[segment]

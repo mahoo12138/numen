@@ -3,6 +3,8 @@ import type Database from 'better-sqlite3'
 export interface Migration {
   version: number
   name: string
+  /** Package that owns the tables this migration defines. */
+  owner: `@numenjs/${string}`
   up(database: Database.Database): void
 }
 
@@ -10,6 +12,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 1,
     name: 'core-durable-domain',
+    owner: '@numenjs/automation',
     up(database) {
       database.exec(`
         CREATE TABLE automations (
@@ -114,6 +117,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 2,
     name: 'execution-block-reason',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         ALTER TABLE executions ADD COLUMN blocked_reason TEXT;
@@ -124,6 +128,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 3,
     name: 'run-cancellation-intent',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         ALTER TABLE runs ADD COLUMN cancel_reason TEXT;
@@ -134,6 +139,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 4,
     name: 'durable-trigger-events',
+    owner: '@numenjs/triggers',
     up(database) {
       database.exec(`
         CREATE TABLE trigger_events (
@@ -164,6 +170,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 5,
     name: 'connection-configs',
+    owner: '@numenjs/connections',
     up(database) {
       database.exec(`
         CREATE TABLE connections (
@@ -187,6 +194,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 6,
     name: 'encrypted-credentials',
+    owner: '@numenjs/credentials',
     up(database) {
       database.exec(`
         CREATE TABLE credentials (
@@ -210,6 +218,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 7,
     name: 'resource-lifecycle',
+    owner: '@numenjs/resources',
     up(database) {
       database.exec(`
         CREATE TABLE resources (
@@ -259,6 +268,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 8,
     name: 'execution-scopes',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         ALTER TABLE executions
@@ -271,6 +281,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 9,
     name: 'execution-scope-branches',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         ALTER TABLE executions ADD COLUMN scope_branch INTEGER;
@@ -282,6 +293,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 10,
     name: 'durable-iterations',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         ALTER TABLE executions ADD COLUMN loop_item_json TEXT;
@@ -310,6 +322,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 11,
     name: 'automation-draft-copy-requests',
+    owner: '@numenjs/automation',
     up(database) {
       database.exec(`
         CREATE TABLE automation_draft_copy_requests (
@@ -323,6 +336,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 12,
     name: 'manual-run-requests',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         CREATE TABLE manual_run_requests (
@@ -336,6 +350,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 13,
     name: 'connection-types',
+    owner: '@numenjs/connections',
     up(database) {
       database.exec(`
         ALTER TABLE connections ADD COLUMN type_id TEXT NOT NULL DEFAULT '';
@@ -348,6 +363,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 14,
     name: 'automation-archives',
+    owner: '@numenjs/automation',
     up(database) {
       database.exec('ALTER TABLE automations ADD COLUMN archived_at TEXT;')
       database.exec('CREATE INDEX automations_archive_idx ON automations(archived_at, updated_at DESC);')
@@ -356,6 +372,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 15,
     name: 'draft-test-execution-snapshots',
+    owner: '@numenjs/automation',
     up(database) {
       const { version } = database.prepare('SELECT sqlite_version() AS version').get() as { version: string }
       const [major = 0, minor = 0] = version.split('.').map(Number)
@@ -383,6 +400,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 16,
     name: 'durable-graph-members',
+    owner: '@numenjs/scheduler',
     up(database) {
       database.exec(`
         CREATE TABLE graph_members (
@@ -401,6 +419,7 @@ export const coreMigrations: readonly Migration[] = [
   {
     version: 17,
     name: 'immutable-output-samples-and-local-tests',
+    owner: '@numenjs/automation',
     up(database) {
       database.exec(`
         CREATE TABLE automation_output_samples (
@@ -414,6 +433,110 @@ export const coreMigrations: readonly Migration[] = [
         ALTER TABLE automation_revisions ADD COLUMN local_test_json TEXT CHECK (local_test_json IS NULL OR purpose = 'draft-test');
         ALTER TABLE executions ADD COLUMN sample_id TEXT;
       `)
+    },
+  },
+  {
+    version: 18,
+    name: 'durable-run-admission',
+    owner: '@numenjs/scheduler',
+    up(database) {
+      database.exec(`
+        CREATE TABLE run_admissions (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
+          max_active INTEGER CHECK (max_active IS NULL OR (
+            typeof(max_active) = 'integer' AND max_active > 0 AND max_active <= 9007199254740991
+          )),
+          overflow TEXT NOT NULL CHECK (overflow IN ('queue', 'drop', 'replace')),
+          namespace TEXT NOT NULL CHECK (namespace IN ('formal', 'test')),
+          replacement_requested INTEGER NOT NULL DEFAULT 0 CHECK (replacement_requested IN (0, 1))
+        );
+        CREATE INDEX runs_admission_group_idx ON runs(automation_id, group_key, status);
+      `)
+    },
+  },
+  {
+    version: 19,
+    name: 'durable-run-attention-and-origins',
+    owner: '@numenjs/scheduler',
+    up(database) {
+      database.exec(`
+        CREATE TABLE run_attentions (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          id TEXT NOT NULL UNIQUE,
+          kind TEXT NOT NULL CHECK (kind IN ('FAILED', 'OUTCOME_UNKNOWN')),
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          automation_id TEXT NOT NULL,
+          revision_id TEXT NOT NULL,
+          execution_id TEXT REFERENCES executions(id) ON DELETE SET NULL,
+          execution_identity TEXT NOT NULL DEFAULT '',
+          attempt_id TEXT REFERENCES attempts(id) ON DELETE SET NULL,
+          occurred_at TEXT NOT NULL,
+          acknowledged_at TEXT,
+          summary TEXT NOT NULL,
+          historical INTEGER NOT NULL DEFAULT 0 CHECK (historical IN (0, 1)),
+          UNIQUE (run_id, kind, execution_identity)
+        );
+        CREATE INDEX run_attentions_inbox_idx ON run_attentions(acknowledged_at, sequence DESC);
+        CREATE INDEX run_attentions_automation_idx ON run_attentions(automation_id, sequence DESC);
+        CREATE TABLE attention_deliveries (
+          attention_id TEXT NOT NULL REFERENCES run_attentions(id) ON DELETE CASCADE,
+          automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+          trigger_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'SKIPPED')),
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          accepted_at TEXT,
+          summary TEXT,
+          PRIMARY KEY (automation_id, trigger_id, attention_id)
+        );
+        CREATE INDEX attention_deliveries_pending_idx ON attention_deliveries(automation_id, trigger_id, status, created_at);
+        CREATE TABLE run_origins (
+          run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('attention', 'replay')),
+          source_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          source_run_identity TEXT NOT NULL,
+          attention_id TEXT REFERENCES run_attentions(id) ON DELETE SET NULL,
+          suppress_attention INTEGER NOT NULL CHECK (suppress_attention IN (0, 1))
+        );
+        CREATE TABLE replay_requests (
+          request_id TEXT PRIMARY KEY,
+          content_hash TEXT NOT NULL,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE
+        );
+      `)
+      // Historical records are visible in the inbox but deliberately have no deliveries.
+      const runs = database.prepare(`
+        SELECT runs.id, runs.automation_id, runs.revision_id, runs.status,
+          runs.finished_at, runs.created_at, automation_revisions.purpose, run_admissions.namespace
+        FROM runs JOIN automation_revisions ON automation_revisions.id = runs.revision_id
+        LEFT JOIN run_admissions ON run_admissions.run_id = runs.id
+      `).all() as Array<{ id: string; automation_id: string; revision_id: string; status: string; finished_at: string | null; created_at: string; purpose: string; namespace: string | null }>
+      const insert = database.prepare(`INSERT OR IGNORE INTO run_attentions
+        (id, kind, run_id, automation_id, revision_id, execution_id, execution_identity, attempt_id, occurred_at, summary, historical)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+      for (const run of runs) {
+        const accepted = database.prepare(`SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'RunAccepted' ORDER BY sequence LIMIT 1`).get(run.id) as { payload_json: string } | undefined
+        let acceptedSource: unknown
+        try { acceptedSource = accepted ? JSON.parse(accepted.payload_json)?.source : undefined } catch { /* Old receipts can be absent or invalid. */ }
+        if (run.namespace === 'test' || run.purpose === 'draft-test' || ['revision-test', 'draft-test', 'local-test'].includes(String(acceptedSource))) continue
+        if (run.status === 'FAILED') {
+          insert.run(`attention_legacy_failed_${run.id}`, 'FAILED', run.id, run.automation_id, run.revision_id, null, '', null,
+            run.finished_at ?? run.created_at, 'The Run failed. Inspect the execution details before running it again.')
+        }
+        const unknown = database.prepare(`SELECT executions.id, executions.updated_at, MIN(run_events.occurred_at) AS first_at
+          FROM executions LEFT JOIN run_events ON run_events.run_id = executions.run_id
+            AND json_valid(run_events.payload_json)
+            AND json_extract(run_events.payload_json, '$.executionId') = executions.id
+            AND (run_events.type = 'AttemptOutcomeUnknown' OR (run_events.type = 'ExecutionBlocked' AND json_extract(run_events.payload_json, '$.reason') = 'OUTCOME_UNKNOWN'))
+          WHERE executions.run_id = ? AND (executions.blocked_reason = 'OUTCOME_UNKNOWN' OR run_events.sequence IS NOT NULL)
+          GROUP BY executions.id`).all(run.id) as Array<{ id: string; updated_at: string; first_at: string | null }>
+        for (const execution of unknown) {
+          insert.run(`attention_legacy_unknown_${execution.id}`, 'OUTCOME_UNKNOWN', run.id, run.automation_id, run.revision_id,
+            execution.id, execution.id, null, execution.first_at ?? execution.updated_at,
+            'An execution outcome is unknown. Verify the external result before cancelling or running it again.')
+        }
+      }
     },
   },
 ]

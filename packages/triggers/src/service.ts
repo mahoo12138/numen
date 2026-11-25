@@ -16,7 +16,9 @@ import { Service, type Context } from 'cordis'
 export interface TriggerServiceHealth {
   ready: boolean
   desiredSubscriptions: number
+  /** Live subscriptions, including providers retrying after a reported ERROR. */
   activeSubscriptions: number
+  /** Missing or failed activations plus live subscriptions reporting ERROR. */
   unavailableSubscriptions: number
 }
 
@@ -25,6 +27,7 @@ export interface AutomationTriggerHealth {
   activationGeneration: number
   revisionId?: string
   expected: number
+  /** Only live subscriptions currently reporting READY. */
   active: number
 }
 
@@ -38,6 +41,7 @@ interface DesiredSubscription {
 interface ActiveSubscription extends DesiredSubscription {
   provider: TriggerProvider
   controller: AbortController
+  status: 'READY' | 'ERROR'
   dispose?: () => void
 }
 
@@ -61,6 +65,10 @@ export class TriggerService extends Service {
   private desiredSubscriptions = 0
   private unavailableSubscriptions = 0
   private readonly active = new Map<string, ActiveSubscription>()
+  private readonly invalidatedConnections = new Set<string>()
+  private flushing = false
+  private reconcilePending = false
+  private notificationPending = false
 
   constructor(ctx: Context) {
     super(ctx, 'triggers')
@@ -70,19 +78,18 @@ export class TriggerService extends Service {
     this.ctx.on('numen/automation-change', () => this.reconcile())
     this.ctx.on('numen/capability-change', () => this.reconcile())
     this.ctx.on('numen/connection-runtime-change', connectionId => {
-      for (const [key, subscription] of this.active) {
-        if (!Object.values(subscription.binding.connectionIds).includes(connectionId)) continue
-        this.disposeSubscription(subscription)
-        this.active.delete(key)
-      }
+      this.invalidatedConnections.add(connectionId)
       this.reconcile()
     })
     this.ready = true
     this.reconcile()
     yield () => {
       this.ready = false
-      for (const subscription of this.active.values()) this.disposeSubscription(subscription)
+      const subscriptions = [...this.active.values()]
       this.active.clear()
+      for (const subscription of subscriptions) this.disposeSubscription(subscription)
+      this.reconcilePending = this.notificationPending = false
+      this.invalidatedConnections.clear()
       this.ctx.emit('numen/trigger-runtime-change')
     }
   }
@@ -92,7 +99,8 @@ export class TriggerService extends Service {
       ready: this.ready,
       desiredSubscriptions: this.desiredSubscriptions,
       activeSubscriptions: this.active.size,
-      unavailableSubscriptions: this.unavailableSubscriptions,
+      unavailableSubscriptions: this.unavailableSubscriptions
+        + [...this.active.values()].filter(subscription => subscription.status === 'ERROR').length,
     }
   }
 
@@ -106,6 +114,7 @@ export class TriggerService extends Service {
       subscription.binding.automationId === automationId
       && subscription.binding.activationGeneration === automation.activationGeneration
       && subscription.binding.revisionId === automation.activeRevisionId
+      && subscription.status === 'READY'
       && !subscription.controller.signal.aborted).length
     const status = !enabled ? 'DISABLED' : !automation.activeRevisionId ? 'NO_REVISION'
       : !this.ready || !revision ? 'UNAVAILABLE' : !expected ? 'NO_TRIGGERS' : active === expected ? 'READY' : 'WAITING'
@@ -114,10 +123,45 @@ export class TriggerService extends Service {
   }
 
   reconcile(): void {
+    if (!this.ready) return
+    this.reconcilePending = true
+    this.flush()
+  }
+
+  private notifyRuntimeChange(): void {
+    this.notificationPending = true
+    this.flush()
+  }
+
+  private flush(): void {
+    if (this.flushing) return
+    this.flushing = true
+    try {
+      while (this.ready && (this.reconcilePending || this.notificationPending)) {
+        if (this.reconcilePending) {
+          this.reconcilePending = false
+          this.reconcileOnce()
+        }
+        // Provider callbacks can change the desired generation synchronously.
+        // Recompute it before notifying observers about a transient snapshot.
+        if (this.reconcilePending) continue
+        if (this.notificationPending) {
+          this.notificationPending = false
+          this.ctx.emit('numen/trigger-runtime-change')
+        }
+      }
+    } finally {
+      this.flushing = false
+    }
+  }
+
+  private reconcileOnce(): void {
     const previousActive = new Map(this.active)
     const previousDesired = this.desiredSubscriptions
     const previousUnavailable = this.unavailableSubscriptions
     const desired = this.collectDesiredSubscriptions()
+    const invalidatedConnections = new Set(this.invalidatedConnections)
+    this.invalidatedConnections.clear()
     this.desiredSubscriptions = desired.size
 
     for (const [key, subscription] of this.active) {
@@ -127,24 +171,30 @@ export class TriggerService extends Service {
         || next.provider !== subscription.provider
         || next.binding.revisionId !== subscription.binding.revisionId
         || next.binding.activationGeneration !== subscription.binding.activationGeneration
+        || Object.values(subscription.binding.connectionIds).some(id => invalidatedConnections.has(id))
       ) {
-        this.disposeSubscription(subscription)
+        // Detach before abort/dispose: either can synchronously request a new
+        // generation and must never see or dispose this subscription again.
         this.active.delete(key)
+        this.disposeSubscription(subscription)
       }
     }
 
     let unavailable = 0
     for (const subscription of desired.values()) {
+      if (this.reconcilePending || !this.ready) break
       if (!subscription.provider) {
         unavailable += 1
         continue
       }
       if (this.active.has(subscription.key)) continue
       try {
-        this.active.set(subscription.key, this.activateSubscription({
+        const active = this.activateSubscription({
           ...subscription,
           provider: subscription.provider,
-        }))
+        })
+        if (this.ready) this.active.set(subscription.key, active)
+        else this.disposeSubscription(active)
       } catch {
         unavailable += 1
         withLogContext({ automationId: subscription.binding.automationId, triggerId: subscription.binding.triggerId }, () => {
@@ -156,7 +206,7 @@ export class TriggerService extends Service {
     if (previousDesired !== this.desiredSubscriptions || previousUnavailable !== unavailable
       || previousActive.size !== this.active.size
       || [...this.active].some(([key, subscription]) => previousActive.get(key) !== subscription)) {
-      this.ctx.emit('numen/trigger-runtime-change')
+      this.notificationPending = true
     }
   }
 
@@ -205,28 +255,49 @@ export class TriggerService extends Service {
       subscription.definition.connections ?? [],
     )
     const metadata = { automationId: subscription.binding.automationId, triggerId: subscription.binding.triggerId, traceId: subscription.binding.automationId }
-    const dispose = withLogContext(metadata, () => subscription.provider.activate({
-      binding: subscription.binding,
-      connections,
-      signal: controller.signal,
-      emit: async (emission: TriggerEmission) => {
-        if (controller.signal.aborted) return { status: 'stale' }
-        const data = subscription.definition.output(emission.data)
-        if (!isNumenValue(data)) {
-          throw new TypeError(`${capabilityKey(subscription.binding.capability)} emitted a non-Numen value`)
-        }
-        const result = this.ctx.scheduler.acceptTrigger(subscription.binding, { ...emission, data })
-        withLogContext({ ...metadata, ...(result.runId ? { runId: result.runId } : {}) }, () => this.ctx.logger('triggers').debug('Trigger emission %s', result.status))
-        return result
-      },
-    }))
-    withLogContext(metadata, () => this.ctx.logger('triggers').info('Trigger activated'))
-    return {
+    const active: ActiveSubscription = {
       ...subscription,
       provider: subscription.provider,
       controller,
-      ...(dispose ? { dispose } : {}),
+      status: 'READY',
     }
+    let activating = true
+    try {
+      const dispose = withLogContext(metadata, () => subscription.provider.activate({
+        binding: subscription.binding,
+        connections,
+        signal: controller.signal,
+        reportStatus: status => {
+          if (controller.signal.aborted || (!activating && this.active.get(subscription.key) !== active)) return
+          if (status !== 'READY' && status !== 'ERROR') throw new TypeError('trigger status must be READY or ERROR')
+          if (active.status === status) return
+          active.status = status
+          // Synchronous activation reports become part of reconcile's initial
+          // snapshot; later changes notify observers without replacing timers.
+          if (!activating) this.notifyRuntimeChange()
+        },
+        emit: async (emission: TriggerEmission) => {
+          if (controller.signal.aborted) return { status: 'stale' }
+          const data = subscription.definition.output(emission.data)
+          if (!isNumenValue(data)) {
+            throw new TypeError(`${capabilityKey(subscription.binding.capability)} emitted a non-Numen value`)
+          }
+          const result = this.ctx.scheduler.acceptTrigger(subscription.binding, { ...emission, data })
+          withLogContext({ ...metadata, ...(result.runId ? { runId: result.runId } : {}) }, () => this.ctx.logger('triggers').debug('Trigger emission %s', result.status))
+          return result
+        },
+      }))
+      if (dispose) active.dispose = dispose
+    } catch (error) {
+      // A failed activate() can already have started asynchronous work. Fence
+      // both its health callback and emissions before a replacement is tried.
+      controller.abort()
+      throw error
+    } finally {
+      activating = false
+    }
+    withLogContext(metadata, () => this.ctx.logger('triggers').info('Trigger activated'))
+    return active
   }
 
   private disposeSubscription(subscription: ActiveSubscription): void {

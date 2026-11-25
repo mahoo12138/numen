@@ -409,6 +409,11 @@ export class BrowserExtensionRegistry extends Service {
     return this.direct.pages.get(key) ?? this.active?.state.pages.get(key)
   }
 
+  /** Observe lifecycle changes without exposing the service's owning Context. */
+  subscribe(listener: () => void): () => void {
+    return this.ctx.on('numen/webui-extension-change', listener)
+  }
+
   listSlots(): FrontendSlot[] {
     return [...this.direct.slots.values(), ...(this.active?.state.slots.values() ?? [])]
       .sort((left, right) => extensionKey(left).localeCompare(extensionKey(right)))

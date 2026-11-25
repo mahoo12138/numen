@@ -68,6 +68,24 @@ function loadedState(): AutomationDraftDocumentState {
 }
 
 describe('local Automation Draft document', () => {
+  it('keeps concurrency changes in history while an older policy autosave completes', () => {
+    let state = loadedState()
+    state = reduceAutomationDraftDocument(state, { type: 'EDIT', command: { type: 'SET_AUTOMATION_INPUTS', inputs: { customerId: { type: 'string', required: true } } } })
+    const first: AutomationSource['policy'] = { maxActive: 1, overflow: 'queue', groupBy: { type: 'ref', path: 'input.customerId' } }
+    state = reduceAutomationDraftDocument(state, { type: 'EDIT', command: { type: 'SET_AUTOMATION_POLICY', policy: first } })
+    state = reduceAutomationDraftDocument(state, { type: 'SAVE_REQUEST' })
+    const saved = state.document!.source
+    state = reduceAutomationDraftDocument(state, { type: 'EDIT', command: { type: 'SET_AUTOMATION_POLICY', policy: { ...first, maxActive: 2, overflow: 'replace' } } })
+    state = reduceAutomationDraftDocument(state, { type: 'SAVE_SUCCESS', result: { draft: draft(2, saved) } })
+    expect(state).toMatchObject({ savePhase: 'DIRTY', document: { source: { policy: { maxActive: 2, overflow: 'replace' } } } })
+    state = reduceAutomationDraftDocument(state, { type: 'UNDO' })
+    expect(state.document!.source.policy).toEqual(first)
+    state = reduceAutomationDraftDocument(state, { type: 'REDO' })
+    expect(state.document!.source.policy).toEqual({ ...first, maxActive: 2, overflow: 'replace' })
+    expect(state.document!.source.inputs).toEqual(saved.inputs)
+    expect(state.document!.source.flow).toEqual(saved.flow)
+  })
+
   it('keeps input declarations in full-document history through concurrent autosave', () => {
     let state = loadedState()
     state = reduceAutomationDraftDocument(state, { type: 'EDIT', command: { type: 'SET_AUTOMATION_INPUTS', inputs: { message: { type: 'string', required: true } } } })

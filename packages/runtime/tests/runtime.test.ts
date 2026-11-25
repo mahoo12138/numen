@@ -87,6 +87,10 @@ describe('Numen runtime', () => {
         providerAvailable: true,
       })] : []),
       expect.objectContaining({
+        definition: expect.objectContaining({ id: 'numen:acknowledge-run-attention', version: 1, kind: 'action' }),
+        providerAvailable: configVersion === 2,
+      }),
+      expect.objectContaining({
         definition: expect.objectContaining({ id: 'numen:automation-activate-revision', version: 1, kind: 'action' }),
         providerAvailable: true,
       }),
@@ -206,6 +210,10 @@ describe('Numen runtime', () => {
       expect.objectContaining({ definition: expect.objectContaining({ id: 'numen:plugin-preview', version: 1, kind: 'query' }), providerAvailable: configVersion === 2 }),
       expect.objectContaining({ definition: expect.objectContaining({ id: 'numen:plugins', version: 1, kind: 'query' }), providerAvailable: configVersion === 2 }),
       expect.objectContaining({
+        definition: expect.objectContaining({ id: 'numen:run-attention', version: 1, kind: 'query' }),
+        providerAvailable: configVersion === 2,
+      }),
+      expect.objectContaining({
         definition: expect.objectContaining({ id: 'numen:run-cancel', version: 1, kind: 'action' }),
         providerAvailable: true,
       }),
@@ -214,8 +222,16 @@ describe('Numen runtime', () => {
         providerAvailable: true,
       }),
       expect.objectContaining({
+        definition: expect.objectContaining({ id: 'numen:run-replay-preview', version: 1, kind: 'query' }),
+        providerAvailable: configVersion === 2,
+      }),
+      expect.objectContaining({
         definition: expect.objectContaining({ id: 'numen:runs-index', version: 1, kind: 'query' }),
         providerAvailable: true,
+      }),
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: 'numen:start-run-replay', version: 1, kind: 'action' }),
+        providerAvailable: configVersion === 2,
       }),
       expect.objectContaining({ definition: expect.objectContaining({ id: 'numen:system', version: 1, kind: 'query' }), providerAvailable: configVersion === 2 }),
       expect.objectContaining({
@@ -793,7 +809,7 @@ describe('Numen runtime', () => {
     expect(await ready.json()).toMatchObject({
       status: 'ready',
       checks: {
-        database: { migrationVersion: 17 },
+        database: { migrationVersion: 19 },
         automations: { ready: true, count: 1 },
         connections: {
           ready: true,

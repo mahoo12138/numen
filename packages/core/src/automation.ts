@@ -154,15 +154,19 @@ export interface AutomationInputDeclaration {
   default?: NumenValue
 }
 
+export interface AutomationConcurrencyPolicy {
+  /** Maximum admitted Runs in a group; a positive safe integer when set. */
+  maxActive?: number
+  overflow?: 'queue' | 'drop' | 'replace'
+  /** Evaluated from trigger/input only and frozen when the Run is accepted. */
+  groupBy?: ValueExpr
+}
+
 export interface AutomationSource {
   inputs?: Record<string, AutomationInputDeclaration>
   triggers: TriggerSource[]
   flow: ControlSource
-  policy?: {
-    maxActive?: number
-    overflow?: 'queue' | 'drop' | 'replace'
-    groupBy?: ValueExpr
-  }
+  policy?: AutomationConcurrencyPolicy
 }
 
 export interface CapabilityRef {

@@ -5,7 +5,7 @@ import { previewGraphConversion } from '../src/graph-conversion.js'
 const capability = (id: string): CapabilitySource => ({ type: 'capability', id, capability: { id: 'echo', version: 1 }, input: {} })
 describe('explicit conservative Graph conversion', () => {
   it('preserves every call, reference, policy and connection once while adding sequential dependencies', () => {
-    const source: AutomationSource = { inputs: { message: { type: 'string', default: '' } }, triggers: [], policy: { maxActive: 1 }, flow: {
+    const source: AutomationSource = { inputs: { message: { type: 'string', default: '' } }, triggers: [], policy: { maxActive: 1, overflow: 'replace', groupBy: { type: 'ref', path: 'input.message' } }, flow: {
       type: 'block', id: 'flow', steps: [capability('a'), { ...capability('b'), connections: { primary: 'connection-1' },
         input: { message: { type: 'ref', path: 'steps.a.message' } }, policy: { timeoutMs: 200 } }],
     } }

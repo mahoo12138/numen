@@ -1,0 +1,27 @@
+{
+  "name": "@numenjs/integration-smtp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "peerDependencies": { "cordis": "4.0.0-rc.8" },
+  "dependencies": {
+    "@numenjs/core": "workspace:*",
+    "@numenjs/connections": "workspace:*",
+    "@numenjs/credentials": "workspace:*",
+    "nodemailer": "10.1.2",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@numenjs/automation": "workspace:*",
+    "@numenjs/database": "workspace:*",
+    "@numenjs/resources": "workspace:*",
+    "@numenjs/scheduler": "workspace:*",
+    "smtp-server": "3.19.23",
+    "@types/smtp-server": "3.5.13"
+  }
+}

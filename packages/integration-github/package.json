@@ -1,0 +1,45 @@
+{
+  "name": "@numenjs/integration-github",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/plugin.d.ts",
+      "default": "./dist/plugin.js"
+    }
+  },
+  "scripts": {
+    "build:app": "vite build"
+  },
+  "peerDependencies": {
+    "cordis": "4.0.0-rc.8"
+  },
+  "dependencies": {
+    "@cordisjs/plugin-server": "^1.7.0",
+    "@numenjs/components": "workspace:*",
+    "@numenjs/connections": "workspace:*",
+    "@numenjs/console": "workspace:*",
+    "@numenjs/core": "workspace:*",
+    "@numenjs/credentials": "workspace:*",
+    "@numenjs/http": "workspace:*",
+    "@numenjs/integration-data": "workspace:*",
+    "@numenjs/logging": "workspace:*",
+    "@numenjs/trigger-ui": "workspace:*",
+    "@numenjs/webui": "workspace:*",
+    "schemastery": "^3.18.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@numenjs/automation": "workspace:*",
+    "@numenjs/database": "workspace:*",
+    "@numenjs/resources": "workspace:*",
+    "@numenjs/scheduler": "workspace:*",
+    "@numenjs/triggers": "workspace:*",
+    "@numenjs/workbench": "workspace:*",
+    "@vitejs/plugin-vue-jsx": "5.1.6",
+    "vite": "^7.3.2"
+  }
+}

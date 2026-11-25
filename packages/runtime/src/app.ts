@@ -7,12 +7,22 @@ import { createRuntimeEntries, loadConfig, readManagedConfig, type LoadedConfig,
 import { ConnectionService } from '@numenjs/connections'
 import { CredentialService } from '@numenjs/credentials'
 import { ResourceService } from '@numenjs/resources'
-import { CapabilityRegistry, ControlRegistry, coreControlsPlugin } from '@numenjs/core'
+import { CapabilityRegistry, ControlRegistry, SystemClock, coreControlsPlugin } from '@numenjs/core'
 import { DatabaseService } from '@numenjs/database'
 import { httpSocksPlugin, OutboundHttpService } from '@numenjs/http'
 import demoIntegrationPlugin from '@numenjs/integration-demo'
 import httpIntegrationPlugin from '@numenjs/integration-http'
 import scheduleIntegrationPlugin from '@numenjs/integration-schedule'
+import runEventsIntegrationPlugin from '@numenjs/integration-run-events'
+import dataIntegrationPlugin from '@numenjs/integration-data'
+import datetimeIntegrationPlugin from '@numenjs/integration-datetime'
+import webhookIntegrationPlugin from '@numenjs/integration-webhook'
+import csvIntegrationPlugin from '@numenjs/integration-csv'
+import mqttIntegrationPlugin from '@numenjs/integration-mqtt'
+import smtpIntegrationPlugin from '@numenjs/integration-smtp'
+import githubIntegrationPlugin from '@numenjs/integration-github'
+import feishuIntegrationPlugin from '@numenjs/integration-feishu'
+import rssIntegrationPlugin from '@numenjs/integration-rss'
 import { SchedulerService } from '@numenjs/scheduler'
 import { TriggerService } from '@numenjs/triggers'
 import workbenchPlugin, { legacyWorkbenchBuiltins } from '@numenjs/workbench/plugin'
@@ -40,6 +50,7 @@ export interface NumenApplication {
 
 const hostBuiltins = {
   i18n: I18nService,
+  clock: SystemClock,
   database: DatabaseService,
   capabilities: CapabilityRegistry,
   controls: ControlRegistry,
@@ -52,6 +63,16 @@ const hostBuiltins = {
   demo: demoIntegrationPlugin,
   httpIntegration: httpIntegrationPlugin,
   schedule: scheduleIntegrationPlugin,
+  runEvents: runEventsIntegrationPlugin,
+  data: dataIntegrationPlugin,
+  datetime: datetimeIntegrationPlugin,
+  webhook: webhookIntegrationPlugin,
+  csv: csvIntegrationPlugin,
+  mqtt: mqttIntegrationPlugin,
+  smtp: smtpIntegrationPlugin,
+  github: githubIntegrationPlugin,
+  feishu: feishuIntegrationPlugin,
+  rss: rssIntegrationPlugin,
   automations: AutomationService,
   scheduler: SchedulerService,
   triggers: TriggerService,

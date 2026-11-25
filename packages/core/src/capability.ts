@@ -57,6 +57,16 @@ export interface CapabilityProvider<
   invoke(invocation: CapabilityInvocation<Input, Connections>): Promise<Output>
 }
 
+/** A Provider can explicitly report that an external side effect has an unknown
+ * outcome. The Scheduler preserves that uncertainty for non-retry-safe calls;
+ * a rejected Promise alone does not imply that nothing happened remotely. */
+export class CapabilityInvocationError extends Error {
+  constructor(message: string, public readonly outcome: 'not-submitted' | 'unknown') {
+    super(message)
+    this.name = 'CapabilityInvocationError'
+  }
+}
+
 export interface TriggerBinding {
   automationId: string
   revisionId: string
@@ -86,6 +96,8 @@ export interface TriggerActivation<Output = NumenValue> {
   connections: ConnectionRuntimeBindings
   signal: AbortSignal
   emit(emission: TriggerEmission<Output>): Promise<TriggerAcceptance>
+  /** Report background health without stopping the subscription. Defaults to READY. */
+  reportStatus?(status: 'READY' | 'ERROR'): void
 }
 
 export interface TriggerProvider<Output = NumenValue> {

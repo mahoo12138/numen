@@ -19,6 +19,21 @@ See [M3 verification and remaining Draft snapshot scope](docs/verification/edito
 - Node.js 22+
 - pnpm 10+
 
+## Documentation website
+
+The VitePress workspace in [`website/`](website/README.md) includes a landing page,
+Chinese getting-started guides, official integration examples, and plugin development
+documentation. It builds independently of the runtime:
+
+```bash
+pnpm docs:dev
+pnpm docs:build
+pnpm docs:test
+```
+
+See [the documentation workspace guide](website/README.md) for preview, subpath
+deployment and browser validation. Architecture decisions remain in `docs/`.
+
 ## Development
 
 ```bash
@@ -48,6 +63,46 @@ pnpm numen config validate
 pnpm numen doctor
 pnpm numen start --safe
 ```
+
+## Official foundation integrations
+
+The default runtime includes Data (JSON parsing/serialization, field merge and
+stable deduplication), Date & Time (explicit timestamps, formatting, calendar
+arithmetic and differences), and authenticated JSON Webhook triggers. Each
+operation has its own versioned Capability. Webhooks acknowledge only after a
+Run is durably accepted and can use delivery IDs for deduplication.
+See [configuration and the complete Webhook → data → date example](docs/27-official-integrations.md).
+
+The runtime also includes MQTT push triggers and publishing, authenticated TLS SMTP
+email, and CSV parsing/export. Configure credentials and connections through the
+existing Schema forms. See [the MQTT → CSV → email guide](docs/29-official-messaging-integrations.md)
+and [ecosystem comparison and remaining platform gaps](docs/28-ecosystem-comparison.md).
+
+GitHub Webhook triggers verify HMAC-SHA256 signatures over the original request
+body, filter event types and actions, and durably deduplicate delivery IDs within
+the same Revision and Trigger. Configure the webhook secret through a Credential
+and bind its Connection to the Trigger. See [GitHub setup and delivery semantics](docs/32-official-github-integration.md).
+The default configuration includes `github: {}`; existing deployments must add it
+explicitly. This is a workspace integration, not an npm publication announcement.
+
+Feishu custom bots provide `feishu:send-text@1` with encrypted webhook credentials,
+optional signing, bounded requests and explicit rate-limit errors. Bind a bot
+Connection to notify a group about GitHub events. New defaults include `feishu: {}`;
+see [the Feishu guide](website/src/integrations/feishu.md) and [full contract](packages/integration-feishu/README.md).
+
+RSS / Atom reading provides `rss:read@1` as a bounded snapshot Query. Use explicit
+ForEach steps to process entries, and Cron to schedule reads; repeated reads retain
+existing items and do not implement cross-run deduplication. GitHub also supports
+Issue get/create/comment operations using a separate encrypted API Token Connection.
+See [the RSS workflow guide](website/src/integrations/rss.md),
+[GitHub Issue operations](website/src/integrations/github-actions.md), and
+[the n8n ecosystem research](docs/33-n8n-next-integrations-research.md). Existing
+deployments must add `rss: {}` and enable the shared `http` service for these operations.
+
+Automation concurrency policies support persistent queues, dropping new runs and
+replacing the oldest active runs, with optional grouping by accepted trigger/input
+data. Test runs have separate capacity from production runs. See
+[run admission, cancellation and recovery](docs/30-run-admission.md).
 
 ## Languages
 

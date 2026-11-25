@@ -33,6 +33,16 @@ plugins:
   demo: {}
   httpIntegration: {}
   schedule: {}
+  runEvents: {}
+  data: {}
+  datetime: {}
+  webhook: {}
+  csv: {}
+  mqtt: {}
+  smtp: {}
+  github: {}
+  feishu: {}
+  rss: {}
   automations: {}
   scheduler: {}
   triggers: {}

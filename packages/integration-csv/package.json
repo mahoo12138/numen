@@ -1,0 +1,25 @@
+{
+  "name": "@numenjs/integration-csv",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "peerDependencies": { "cordis": "4.0.0-rc.8" },
+  "dependencies": {
+    "@numenjs/core": "workspace:*",
+    "@numenjs/integration-data": "workspace:*",
+    "csv-parse": "7.0.3",
+    "csv-stringify": "6.9.0",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@numenjs/automation": "workspace:*",
+    "@numenjs/database": "workspace:*",
+    "@numenjs/resources": "workspace:*",
+    "@numenjs/scheduler": "workspace:*"
+  }
+}

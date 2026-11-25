@@ -141,6 +141,12 @@ QUEUED = 已接受但未获取 permit。
 
 WAITING/BLOCKED 的 admitted Run 默认继续占 permit，避免绕过 maxActive。
 
+准入策略与序号保存在 SQLite，默认不限制活动 Run；设置 `maxActive` 后默认排队。作用域为 Automation + 正式/测试命名空间 + 冻结分组，同一流程不同 Revision 共享该作用域的名额，每个候选使用自身接受时的策略。正式运行与全部测试运行隔离。
+
+`drop` 保留接受收据并以 `OVERFLOW` 原因取消新 Run。`replace` 只取消腾出所需名额的最早运行，保留已有排队 Run；取消完成前不把名额交给替代运行。持久替换意图预留即将释放的名额，普通队列不会抢占。
+
+同毫秒排队使用持久递增接受序号。等待、阻塞和底层 Provider 调用尚未停止的取消继续占名额。进程内 Promise 生命周期不能证明远端副作用停止，也不提供跨进程严格一次保证。配置、迁移、事务及验收细节见 [30. 运行并发与持久准入](30-run-admission.md)。
+
 ## 10. Structured Concurrency
 
 Scope Tree 管理：
@@ -186,7 +192,11 @@ CONNECTION_DISPOSED
 RECONFIGURED
 SHUTDOWN
 CREDENTIAL_ROTATED
+OVERFLOW
+REPLACED
 ```
+
+取消 API 可先将 Run 置为 `CANCELLED`，表示取消已提交、迟到结果不再接纳；本进程中 Provider 原始调用尚未 settled 时仍保留准入名额，不能据终态提前启动替代运行。进程重启恢复持久取消意图，但无法撤销或证明远端已接收的请求停止。
 
 ## 12. Run Context
 
@@ -222,7 +232,7 @@ Retry = same Run/new Attempt；Run Again = new Run。
 
 ## Graph 耐久协调
 
-Graph scope 在数据库记录每个成员的 Execution 身份或明确 skip，唯一约束防止多个前驱/多个 Scheduler 创建重复逻辑调用。依赖依据固定计划和成员终态判定；共享节点只有一个结果。就绪成员使用现有全局并发限制，不按画布坐标或 Source 数组排列决定顺序。
+Graph scope 在数据库记录每个成员的 Execution 身份或明确 skip，唯一约束防止多个前驱或重复协调创建重复逻辑调用。依赖依据固定计划和成员终态判定；共享节点只有一个结果。就绪成员使用现有全局并发限制，不按画布坐标或 Source 数组排列决定顺序。当前运行模式是单活跃 Scheduler；这些唯一约束不等于完整的多 worker 租约与恢复协调。
 
 全部输入 Merge 等待每个具名输入；所选输入 Merge 等待所有互斥候选完成或 skip，恰好一个成功才返回该值。`null` 和 `[]` 均为真实结果。Graph ForEach 为每项持久化作用域及输入序号，按输入顺序收集循环体显式输出，嵌套项相互隔离，失败采用 fail-fast。
 

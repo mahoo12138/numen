@@ -1,3 +1,4 @@
+import { workbenchAttentionProviderPlugin } from './attention-provider.js'
 import { localTestProviderPlugin } from './local-test-provider.js'
 import { workbenchConnectionUsageProviderPlugin } from './connection-usage-provider.js'
 import { workbenchAutomationSnapshotProviderPlugin } from './automation-snapshot-provider.js'
@@ -42,6 +43,7 @@ export function workbenchPlugin(ctx: Context, config: WorkbenchConfig = {}): voi
   ctx.plugin(workbenchAutomationRestorationProviderPlugin)
   ctx.plugin(workbenchConnectionsProviderPlugin)
   ctx.plugin(workbenchCredentialsProviderPlugin)
+  ctx.plugin(workbenchAttentionProviderPlugin)
   ctx.plugin(workbenchHomeProviderPlugin)
   ctx.plugin(workbenchLogsProviderPlugin)
   ctx.plugin(workbenchInvalidationProviderPlugin)

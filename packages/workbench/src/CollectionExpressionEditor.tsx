@@ -82,6 +82,8 @@ function renderCollection(props: Readonly<CollectionProps>) {
           {...(props.schemaUI ? { schemaUI: props.schemaUI } : {})}
           {...(props.source ? { source: props.source } : {})}
           {...(props.variableCatalog ? { variableCatalog: props.variableCatalog } : {})}
+          {...(props.variables ? { variables: props.variables } : {})}
+          {...(props.referenceHelp ? { referenceHelp: props.referenceHelp } : {})}
           onChange={next => props.onChange(expression.type === 'object'
             ? { type: 'object', entries: Object.fromEntries(rows.map(([name, entry]) => [name, name === key ? next ?? { type: 'literal', value: null } : entry])) }
             : { type: 'array', items: expression.items.map((item, itemIndex) => itemIndex === index ? next ?? { type: 'literal', value: null } : item) })} />
@@ -100,5 +102,5 @@ function renderCollection(props: Readonly<CollectionProps>) {
 }
 
 export const CollectionExpressionEditor = defineSetupComponent<CollectionProps>('CollectionExpressionEditor',
-  ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'focusRequest', 'depth', 'discardEpoch', 'onDraftStateChange', 'confirmDiscard', 'onChange'],
+  ['nodeId', 'field', 'expression', 'problem', 'canEdit', 'schemaUI', 'source', 'variableCatalog', 'variables', 'referenceHelp', 'focusRequest', 'depth', 'discardEpoch', 'onDraftStateChange', 'confirmDiscard', 'onChange'],
   props => () => renderCollection(props))

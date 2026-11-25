@@ -2,7 +2,16 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, chown, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { isAlias, isMap, isNode, isScalar, parseDocument, visit, type Pair, type YAMLMap } from 'yaml'
-import { ConfigError, legacyConsoleNames, legacyWorkbenchNames, splitPluginKey, validateConfig } from './config.js'
+import { ConfigError, splitPluginKey, validateConfig } from './config.js'
+import {
+  consoleBuiltin,
+  legacyBuiltinFamily,
+  legacyBuiltinNames,
+  legacyConsoleNames,
+  legacyWorkbenchNames,
+  workbenchBuiltin,
+  type LegacyBuiltinLeaf,
+} from './builtins.js'
 import { withConfigFileLock } from './persistence.js'
 import type { PluginConfig } from './types.js'
 
@@ -15,15 +24,17 @@ export interface ConfigMigrationPlan {
   diagnostics: string[]
 }
 
-const fields: Record<string, readonly string[]> = {
-  console: [], consoleEntries: [],
-  consoleAuth: ['token', 'ownerId'], consoleSession: ['path', 'secureCookie'],
-  consoleAssets: ['mode', 'manifestPath', 'assetPath'], consoleHttp: ['path'],
-  consoleWs: ['path', 'maxMessageBytes', 'maxBufferedBytes'],
-  workbench: ['root', 'assetPath', 'entrySource'],
+const legacyLeaves: Record<string, LegacyBuiltinLeaf> = { ...consoleBuiltin.leaves, ...workbenchBuiltin.leaves }
+const knownLegacyNames = new Set<string>(legacyBuiltinNames)
+
+function leafFields(name: string): readonly string[] {
+  return legacyLeaves[name]?.fields ?? []
 }
-const consoleSections: Record<string, string> = { consoleAuth: 'auth', consoleSession: 'session', consoleAssets: 'assets', consoleHttp: 'http', consoleWs: 'websocket' }
-const knownLegacyNames = new Set<string>([...legacyConsoleNames, ...legacyWorkbenchNames])
+
+function leafSection(name: string): string | undefined {
+  return legacyLeaves[name]?.section
+}
+
 export function configFingerprint(source: string): string { return createHash('sha256').update(source).digest('hex') }
 
 /** Only this internal result contains source text; the CLI prints the value-free plan. */
@@ -54,7 +65,8 @@ function buildMigration(source: string, builtins: ReadonlySet<string>): { plan: 
     }
     const resolved = knownLegacyNames.has(name) ? name : packageSource === '@numenjs/workbench/runtime' ? 'workbench' : plugin.$package?.startsWith('cordis:') ? plugin.$package.slice(7) : undefined
     if (!resolved || !knownLegacyNames.has(resolved)) continue
-    const family = resolved.startsWith('console') ? 'console' : 'workbench'
+    const family = legacyBuiltinFamily(resolved)
+    if (!family) continue
     groups[family]!.push({ key, name: resolved, config: plugin, pair })
   }
   const enabledProducts = new Map<string, boolean>()
@@ -69,7 +81,7 @@ function buildMigration(source: string, builtins: ReadonlySet<string>): { plan: 
     if (enabled.some(value => value !== enabled[0])) plan.conflicts.push(`${family}: mixed member enablement cannot be represented by one product entry.`)
     enabledProducts.set(family, enabled[0] ?? false)
     for (const member of members) {
-      const allowed = fields[member.name] ?? []
+      const allowed = leafFields(member.name)
       const unknown = Object.keys(member.config).filter(key => !['$if', '$package', ...allowed].includes(key))
       if (unknown.length) plan.conflicts.push(`config.plugins.${member.key}: unsupported fields prevent lossless migration (values omitted).`)
       // Aliases can refer to moved/removed anchors elsewhere. Keep the file untouched rather than break them.
@@ -120,9 +132,9 @@ function buildMigration(source: string, builtins: ReadonlySet<string>): { plan: 
         content.delete(meta)
       }
       if (member === primary && family === 'workbench') replacement.items.push(...content.items)
-      else if (consoleSections[member.name]) replacement.set(consoleSections[member.name]!, content)
+      else if (leafSection(member.name)) replacement.set(leafSection(member.name)!, content)
       if (member !== primary) {
-        if (!consoleSections[member.name]) {
+        if (!leafSection(member.name)) {
           if (node.commentBefore) extraComments.push(node.commentBefore)
           if (node.comment) extraComments.push(node.comment)
           visit(node, { Scalar(_key, scalar) { if (scalar.commentBefore) extraComments.push(scalar.commentBefore); if (scalar.comment) extraComments.push(scalar.comment) } })

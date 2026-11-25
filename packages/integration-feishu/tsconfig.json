@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "tsBuildInfoFile": "dist/.tsbuildinfo", "lib": ["ES2023", "DOM"] },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../core" }, { "path": "../connections" }, { "path": "../credentials" }, { "path": "../http" }, { "path": "../logging" }
+  ]
+}
