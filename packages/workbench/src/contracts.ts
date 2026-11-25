@@ -1,3 +1,4 @@
+export * from './attention-contracts.js'
 import type { SchemaFieldType as WorkbenchSchemaFieldType, SchemaOption as WorkbenchSchemaOption, SchemaField as WorkbenchSchemaField } from '@numenjs/components'
 import type { ConsoleProcedureRef } from '@numenjs/console'
 import type {
