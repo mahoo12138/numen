@@ -1,41 +1,59 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import { defineConfig } from 'vitest/config'
 
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url))
 
+/**
+ * Aliases are derived from each workspace package's `exports` map so a new
+ * package or subpath is picked up without editing this file. `packages/runtime/
+ * tests/architecture.test.ts` asserts every package resolves from `src`.
+ */
+function workspacePackages(): Array<{ root: string; name: string; exports: Record<string, unknown> }> {
+  const packages: Array<{ root: string; name: string; exports: Record<string, unknown> }> = []
+  for (const category of ['packages', 'examples']) {
+    for (const entry of readdirSync(join(fromRoot('.'), category))) {
+      const manifestPath = join(fromRoot('.'), category, entry, 'package.json')
+      if (!existsSync(manifestPath)) continue
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { name: string; exports?: Record<string, unknown> }
+      packages.push({ root: join(category, entry), name: manifest.name, exports: manifest.exports ?? { '.': undefined } })
+    }
+  }
+  return packages
+}
+
+/** `./dist/plugin.js` -> `src/plugin.ts`, preferring the source file that exists. */
+function sourceFile(root: string, subpath: string): string | undefined {
+  if (subpath.endsWith('.css')) return `${root}/src/${subpath.split('/').pop()}`
+  const stem = subpath.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '')
+  for (const extension of ['.ts', '.tsx']) {
+    if (existsSync(join(fromRoot('.'), `${root}/${stem}${extension}`))) return `${root}/${stem}${extension}`
+  }
+  return undefined
+}
+
+const aliases: Record<string, string> = {}
+for (const workspacePackage of workspacePackages()) {
+  for (const [key, value] of Object.entries(workspacePackage.exports)) {
+    const target = typeof value === 'string' ? value : (value as { default?: string })?.default
+    const specifier = key === '.' ? workspacePackage.name : `${workspacePackage.name}/${key.slice(2)}`
+    const resolved = sourceFile(workspacePackage.root, target ?? './src/index.js')
+    if (!resolved) continue
+    aliases[specifier] = fromRoot(`./${resolved}`)
+  }
+}
+
+// Longest specifier first so `@numenjs/components` cannot shadow
+// `@numenjs/components/style.css`.
+const alias = Object.entries(aliases)
+  .sort(([left], [right]) => right.length - left.length)
+  .map(([find, replacement]) => ({ find: new RegExp(`^${find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), replacement }))
+
 export default defineConfig({
   plugins: [vueJsx()],
-  resolve: {
-    alias: {
-      '@numenjs/components/style.css': fromRoot('./packages/components/src/style.css'),
-      '@numenjs/components/vite': fromRoot('./packages/components/src/vite.ts'),
-      '@numenjs/components': fromRoot('./packages/components/src/index.ts'),
-      '@numenjs/logging/contracts': fromRoot('./packages/logging/src/contracts.ts'),
-      '@numenjs/logging/config': fromRoot('./packages/logging/src/config.ts'),
-      '@numenjs/logging': fromRoot('./packages/logging/src/index.ts'),
-      '@numenjs/i18n': fromRoot('./packages/i18n/src/index.ts'),
-      '@numenjs/config': fromRoot('./packages/config/src/index.ts'),
-      '@numenjs/core': fromRoot('./packages/core/src/index.ts'),
-      '@numenjs/integration-data/json': fromRoot('./packages/integration-data/src/json.ts'),
-      '@numenjs/integration-data': fromRoot('./packages/integration-data/src/index.ts'),
-      '@numenjs/integration-datetime': fromRoot('./packages/integration-datetime/src/index.ts'),
-      '@numenjs/integration-csv': fromRoot('./packages/integration-csv/src/index.ts'),
-      '@numenjs/integration-mqtt': fromRoot('./packages/integration-mqtt/src/index.ts'),
-      '@numenjs/integration-smtp': fromRoot('./packages/integration-smtp/src/index.ts'),
-      '@numenjs/workbench/trigger-details': fromRoot('./packages/workbench/src/trigger-details.ts'),
-      '@numenjs/workbench/i18n': fromRoot('./packages/workbench/src/i18n.ts'),
-      '@numenjs/database': fromRoot('./packages/database/src/index.ts'),
-      '@numenjs/credentials': fromRoot('./packages/credentials/src/index.ts'),
-      '@numenjs/automation': fromRoot('./packages/automation/src/index.ts'),
-      '@numenjs/scheduler': fromRoot('./packages/scheduler/src/index.ts'),
-      '@numenjs/triggers': fromRoot('./packages/triggers/src/index.ts'),
-      '@numenjs/runtime': fromRoot('./packages/runtime/src/index.ts'),
-      '@numenjs/console': fromRoot('./packages/console/src/index.ts'),
-      '@numenjs/workbench/plugin': fromRoot('./packages/workbench/src/plugin.ts'),
-      '@numenjs/workbench/runtime': fromRoot('./packages/workbench/src/runtime.ts'),
-    },
-  },
+  resolve: { alias },
   test: {
     include: ['packages/*/tests/**/*.test.{ts,tsx}'],
     testTimeout: 15_000,
