@@ -308,7 +308,7 @@ describe('SMTP integration with real TLS protocol fixtures', () => {
     expect(server.messages).toHaveLength(1)
   })
 
-  it.each(['disconnect', 'hold'] as const)('persists safe failure after DATA %s without automatic resend across restart', async finalResponse => {
+  it.each(['disconnect', 'hold'] as const)('persists an unknown outcome after DATA %s without automatic resend across restart', async finalResponse => {
     const server = await fixture({ finalResponse })
     const directory = await mkdtemp(join(tmpdir(), 'numen-smtp-failure-'))
     directories.push(directory)
@@ -329,10 +329,12 @@ describe('SMTP integration with real TLS protocol fixtures', () => {
     root.automations.activateRevision(automation.id, revision.id)
     const run = root.scheduler.startManual(automation.id)
     await root.scheduler.dispatchUntilIdle()
-    expect(root.scheduler.getRun(run.id)?.status).toBe('FAILED')
+    expect(root.scheduler.getRun(run.id)?.status).toBe('RUNNING')
+    expect(root.scheduler.listExecutions(run.id)[0]).toMatchObject({ status: 'BLOCKED', blockedReason: 'OUTCOME_UNKNOWN' })
     expect(server.messages).toHaveLength(1)
     const attempts = root.scheduler.listAttempts(run.id)
     expect(attempts).toHaveLength(1)
+    expect(attempts[0]?.status).toBe('OUTCOME_UNKNOWN')
     expect(attempts[0]!.error).toMatchObject({ name: 'SmtpError', message: expect.stringContaining('duplicate') })
     expect(JSON.stringify(attempts)).not.toContain(server.credential.password)
     await root.fiber.dispose()
@@ -342,7 +344,8 @@ describe('SMTP integration with real TLS protocol fixtures', () => {
     await restarted.plugin(SchedulerService, { autoDispatch: false })
     await restarted.connections.reconcile()
     await restarted.scheduler.dispatchUntilIdle()
-    expect(restarted.scheduler.getRun(run.id)?.status).toBe('FAILED')
+    expect(restarted.scheduler.getRun(run.id)?.status).toBe('RUNNING')
+    expect(restarted.scheduler.listExecutions(run.id)[0]).toMatchObject({ status: 'BLOCKED', blockedReason: 'OUTCOME_UNKNOWN' })
     expect(restarted.scheduler.listAttempts(run.id)).toEqual(attempts)
     expect(server.messages).toHaveLength(1)
   })

@@ -1,5 +1,6 @@
 import SMTPConnection from 'nodemailer/lib/smtp-connection'
 import MailComposer from 'nodemailer/lib/mail-composer'
+import { CapabilityInvocationError } from '@numenjs/core'
 import { isIP } from 'node:net'
 import type { Readable } from 'node:stream'
 import { createSecureContext } from 'node:tls'
@@ -53,10 +54,10 @@ const messages: Record<SmtpErrorCode, string> = {
   SMTP_SEND_FAILED: 'The email could not be confirmed as accepted; the server may already have accepted it and retry may send a duplicate.',
 }
 
-export class SmtpError extends Error {
+export class SmtpError extends CapabilityInvocationError {
   override name = 'SmtpError'
-  constructor(public readonly code: SmtpErrorCode, public readonly outcome: 'not-submitted' | 'unknown' = 'not-submitted') {
-    super(`[${code}] ${messages[code]}`)
+  constructor(public readonly code: SmtpErrorCode, outcome: 'not-submitted' | 'unknown' = 'not-submitted') {
+    super(`[${code}] ${messages[code]}`, outcome)
   }
 }
 
