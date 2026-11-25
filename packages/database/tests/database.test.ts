@@ -13,6 +13,21 @@ afterEach(async () => {
 })
 
 describe('DatabaseService', () => {
+  it('records an owning package for every core migration', () => {
+    const owners = new Set([
+      '@numenjs/automation', '@numenjs/connections', '@numenjs/credentials',
+      '@numenjs/resources', '@numenjs/scheduler', '@numenjs/triggers',
+    ])
+    const versions = coreMigrations.map(migration => migration.version)
+    expect(new Set(versions).size).toBe(versions.length)
+    expect(versions).toEqual([...versions].sort((left, right) => left - right))
+    expect(new Set(coreMigrations.map(migration => migration.name)).size).toBe(coreMigrations.length)
+    for (const migration of coreMigrations) {
+      expect(owners, `migration ${migration.name} declares an unknown owner ${migration.owner}`)
+        .toContain(migration.owner)
+    }
+  })
+
   it('upgrades a populated v12 database and marks legacy Connections for Adapter-owned type adoption', () => {
     const db = new Database(':memory:')
     try {
@@ -22,7 +37,7 @@ describe('DatabaseService', () => {
       db.prepare('INSERT INTO connections (id, name, adapter_id, adapter_version, config_json, enabled, generation, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)')
         .run('conn_existing', 'Existing', 'legacy:adapter', 2, '{}', 'now', 'now')
       const before = db.prepare('SELECT * FROM automation_drafts').get()
-      expect(runMigrations(db)).toBe(6)
+      expect(runMigrations(db)).toBe(7)
       expect(db.prepare('SELECT * FROM automation_drafts').get()).toEqual(before)
       expect(db.prepare('SELECT COUNT(*) AS count FROM automation_draft_copy_requests').get()).toEqual({ count: 0 })
       expect(db.prepare('SELECT COUNT(*) AS count FROM manual_run_requests').get()).toEqual({ count: 0 })
@@ -57,7 +72,7 @@ describe('DatabaseService', () => {
     expect(tables).toContain('graph_members')
     expect(tables).toContain('automation_output_samples')
     expect(tables).toContain('run_admissions')
-    expect(root.database.health()).toMatchObject({ ready: true, migrationVersion: 18 })
+    expect(root.database.health()).toMatchObject({ ready: true, migrationVersion: 19 })
     expect(runMigrations(root.database.db)).toBe(0)
 
     await root.fiber.dispose()
@@ -68,7 +83,7 @@ describe('DatabaseService', () => {
     await root.plugin(DatabaseService, { path: ':memory:' })
 
     expect(() => runMigrations(root.database.db, [{
-      version: 19,
+      version: 20,
       name: 'broken',
       up(database) {
         database.exec('CREATE TABLE should_rollback (id TEXT);')
