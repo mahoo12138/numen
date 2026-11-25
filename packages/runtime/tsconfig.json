@@ -18,6 +18,7 @@
     { "path": "../integration-demo" },
     { "path": "../integration-http" },
     { "path": "../integration-schedule" },
+    { "path": "../integration-run-events" },
     { "path": "../credentials" },
     { "path": "../resources" },
     { "path": "../automation" },
@@ -29,6 +30,9 @@
     { "path": "../integration-webhook" },
     { "path": "../integration-csv" },
     { "path": "../integration-mqtt" },
-    { "path": "../integration-smtp" }
+    { "path": "../integration-smtp" },
+    { "path": "../integration-github" },
+    { "path": "../integration-feishu" },
+    { "path": "../integration-rss" }
   ]
 }

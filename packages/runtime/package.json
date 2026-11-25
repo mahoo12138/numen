@@ -27,6 +27,7 @@
     "@numenjs/integration-demo": "workspace:*",
     "@numenjs/integration-http": "workspace:*",
     "@numenjs/integration-schedule": "workspace:*",
+    "@numenjs/integration-run-events": "workspace:*",
     "@numenjs/resources": "workspace:*",
     "@numenjs/scheduler": "workspace:*",
     "@numenjs/triggers": "workspace:*",
@@ -38,7 +39,10 @@
     "@numenjs/integration-webhook": "workspace:*",
     "@numenjs/integration-csv": "workspace:*",
     "@numenjs/integration-mqtt": "workspace:*",
-    "@numenjs/integration-smtp": "workspace:*"
+    "@numenjs/integration-smtp": "workspace:*",
+    "@numenjs/integration-github": "workspace:*",
+    "@numenjs/integration-feishu": "workspace:*",
+    "@numenjs/integration-rss": "workspace:*"
   },
   "devDependencies": {
     "schemastery": "^3.18.0"
