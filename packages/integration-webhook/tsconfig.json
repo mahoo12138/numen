@@ -35,7 +35,7 @@
       "path": "../components"
     },
     {
-      "path": "../workbench"
+      "path": "../trigger-ui"
     },
     {
       "path": "../webui"

@@ -19,13 +19,13 @@
   },
   "dependencies": {
     "@cordisjs/plugin-server": "^1.7.0",
-    "@numenjs/core": "workspace:*",
+    "@numenjs/components": "workspace:*",
     "@numenjs/connections": "workspace:*",
+    "@numenjs/console": "workspace:*",
+    "@numenjs/core": "workspace:*",
     "@numenjs/credentials": "workspace:*",
     "@numenjs/integration-data": "workspace:*",
-    "@numenjs/console": "workspace:*",
-    "@numenjs/components": "workspace:*",
-    "@numenjs/workbench": "workspace:*",
+    "@numenjs/trigger-ui": "workspace:*",
     "@numenjs/webui": "workspace:*",
     "schemastery": "^3.18.0",
     "vue": "^3.5.0"
@@ -33,10 +33,11 @@
   "devDependencies": {
     "@numenjs/automation": "workspace:*",
     "@numenjs/database": "workspace:*",
+    "@numenjs/logging": "workspace:*",
     "@numenjs/resources": "workspace:*",
     "@numenjs/scheduler": "workspace:*",
     "@numenjs/triggers": "workspace:*",
-    "@numenjs/logging": "workspace:*",
+    "@numenjs/workbench": "workspace:*",
     "@vitejs/plugin-vue-jsx": "5.1.6",
     "vite": "^7.3.2"
   }

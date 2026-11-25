@@ -2,8 +2,7 @@ import type { Context } from 'cordis'
 import type {} from '@numenjs/webui'
 import { Button, FormSection, Input } from '@numenjs/components'
 import { defineComponent, ref, watch, type PropType } from 'vue'
-import { triggerDetailsSlot, type TriggerDetailsContribution, type TriggerDetailsProps } from '@numenjs/workbench/trigger-details'
-import { useWorkbenchI18n } from '@numenjs/workbench/i18n'
+import { triggerDetailsSlot, useTriggerDetailsLocale, type TriggerDetailsContribution, type TriggerDetailsProps } from '@numenjs/trigger-ui'
 import { webhookPath } from './path.js'
 
 export const WebhookDetails = defineComponent({
@@ -13,12 +12,12 @@ export const WebhookDetails = defineComponent({
     trigger: { type: Object as PropType<TriggerDetailsProps['trigger']>, required: true },
   },
   setup(props) {
-    const language = useWorkbenchI18n()
+    const language = useTriggerDetailsLocale()
     const copied = ref(false)
     const failed = ref(false)
     watch(() => [props.automationId, props.trigger.id], () => { copied.value = false; failed.value = false })
     return () => {
-      const zh = language.locale.value === 'zh-CN'
+      const zh = language.value === 'zh-CN'
       const path = webhookPath(props.automationId, props.trigger.id)
       return <FormSection title={zh ? 'Webhook 入口' : 'Webhook endpoint'}>
         <label style={{ gridTemplateColumns: 'minmax(0, 1fr)', gap: '6px' }}><span>{zh ? '请求路径' : 'Request path'}</span><Input aria-label={zh ? 'Webhook 请求路径' : 'Webhook request path'} readonly value={path} /></label>
