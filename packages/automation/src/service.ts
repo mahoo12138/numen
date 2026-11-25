@@ -456,6 +456,13 @@ export class AutomationService extends Service {
     return (this.ctx.database.db.prepare('SELECT COUNT(*) AS count FROM automations WHERE archived_at IS NULL').get() as { count: number }).count
   }
 
+  /** Enabled, unarchived Automations and their active Revision, without loading Sources. */
+  listActiveRevisions(): Array<{ automationId: string; revisionId: string }> {
+    return this.ctx.database.db.prepare(`SELECT id AS automationId, active_revision_id AS revisionId FROM automations
+      WHERE enabled = 1 AND archived_at IS NULL AND active_revision_id IS NOT NULL`)
+      .all() as Array<{ automationId: string; revisionId: string }>
+  }
+
   publishDraft(automationId: string, expectedDraftVersion?: number): AutomationRevision {
     const draft = this.getDraft(automationId)
     if (!draft) throw new AutomationNotFoundError(`automation not found: ${automationId}`)
