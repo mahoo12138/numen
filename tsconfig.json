@@ -38,6 +38,9 @@
       "path": "packages/integration-schedule"
     },
     {
+      "path": "packages/integration-run-events"
+    },
+    {
       "path": "packages/credentials"
     },
     {
@@ -84,6 +87,18 @@
     },
     {
       "path": "packages/integration-smtp"
+    },
+    {
+      "path": "packages/integration-github"
+    },
+    {
+      "path": "packages/integration-feishu"
+    },
+    {
+      "path": "packages/integration-rss"
+    },
+    {
+      "path": "packages/trigger-ui"
     }
   ]
 }

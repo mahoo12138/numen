@@ -344,6 +344,113 @@ importers:
         specifier: workspace:*
         version: link:../scheduler
 
+  packages/integration-feishu:
+    dependencies:
+      '@numenjs/connections':
+        specifier: workspace:*
+        version: link:../connections
+      '@numenjs/core':
+        specifier: workspace:*
+        version: link:../core
+      '@numenjs/credentials':
+        specifier: workspace:*
+        version: link:../credentials
+      '@numenjs/http':
+        specifier: workspace:*
+        version: link:../http
+      '@numenjs/logging':
+        specifier: workspace:*
+        version: link:../logging
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+    devDependencies:
+      '@numenjs/automation':
+        specifier: workspace:*
+        version: link:../automation
+      '@numenjs/database':
+        specifier: workspace:*
+        version: link:../database
+      '@numenjs/resources':
+        specifier: workspace:*
+        version: link:../resources
+      '@numenjs/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+
+  packages/integration-github:
+    dependencies:
+      '@cordisjs/plugin-server':
+        specifier: ^1.7.0
+        version: 1.7.0(cordis@4.0.0-rc.8)
+      '@numenjs/components':
+        specifier: workspace:*
+        version: link:../components
+      '@numenjs/connections':
+        specifier: workspace:*
+        version: link:../connections
+      '@numenjs/console':
+        specifier: workspace:*
+        version: link:../console
+      '@numenjs/core':
+        specifier: workspace:*
+        version: link:../core
+      '@numenjs/credentials':
+        specifier: workspace:*
+        version: link:../credentials
+      '@numenjs/http':
+        specifier: workspace:*
+        version: link:../http
+      '@numenjs/integration-data':
+        specifier: workspace:*
+        version: link:../integration-data
+      '@numenjs/logging':
+        specifier: workspace:*
+        version: link:../logging
+      '@numenjs/trigger-ui':
+        specifier: workspace:*
+        version: link:../trigger-ui
+      '@numenjs/webui':
+        specifier: workspace:*
+        version: link:../webui
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.41(typescript@5.9.3)
+    devDependencies:
+      '@numenjs/automation':
+        specifier: workspace:*
+        version: link:../automation
+      '@numenjs/database':
+        specifier: workspace:*
+        version: link:../database
+      '@numenjs/resources':
+        specifier: workspace:*
+        version: link:../resources
+      '@numenjs/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+      '@numenjs/triggers':
+        specifier: workspace:*
+        version: link:../triggers
+      '@numenjs/workbench':
+        specifier: workspace:*
+        version: link:../workbench
+      '@vitejs/plugin-vue-jsx':
+        specifier: 5.1.6
+        version: 5.1.6(vite@7.3.6(@cordiverse/tsx@4.19.3-fix.3)(@types/node@22.20.1)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
+      vite:
+        specifier: ^7.3.2
+        version: 7.3.6(@cordiverse/tsx@4.19.3-fix.3)(@types/node@22.20.1)(yaml@2.9.0)
+
   packages/integration-http:
     dependencies:
       '@numenjs/core':
@@ -417,6 +524,64 @@ importers:
       aedes:
         specifier: 1.2.0
         version: 1.2.0
+
+  packages/integration-rss:
+    dependencies:
+      '@numenjs/core':
+        specifier: workspace:*
+        version: link:../core
+      '@numenjs/http':
+        specifier: workspace:*
+        version: link:../http
+      '@numenjs/logging':
+        specifier: workspace:*
+        version: link:../logging
+      '@rgrove/parse-xml':
+        specifier: 4.2.0
+        version: 4.2.0
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/integration-run-events:
+    dependencies:
+      '@numenjs/core':
+        specifier: workspace:*
+        version: link:../core
+      '@numenjs/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+    devDependencies:
+      '@numenjs/automation':
+        specifier: workspace:*
+        version: link:../automation
+      '@numenjs/connections':
+        specifier: workspace:*
+        version: link:../connections
+      '@numenjs/credentials':
+        specifier: workspace:*
+        version: link:../credentials
+      '@numenjs/database':
+        specifier: workspace:*
+        version: link:../database
+      '@numenjs/integration-smtp':
+        specifier: workspace:*
+        version: link:../integration-smtp
+      '@numenjs/resources':
+        specifier: workspace:*
+        version: link:../resources
+      '@numenjs/triggers':
+        specifier: workspace:*
+        version: link:../triggers
 
   packages/integration-schedule:
     dependencies:
@@ -515,12 +680,12 @@ importers:
       '@numenjs/integration-data':
         specifier: workspace:*
         version: link:../integration-data
+      '@numenjs/trigger-ui':
+        specifier: workspace:*
+        version: link:../trigger-ui
       '@numenjs/webui':
         specifier: workspace:*
         version: link:../webui
-      '@numenjs/workbench':
-        specifier: workspace:*
-        version: link:../workbench
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
@@ -549,6 +714,9 @@ importers:
       '@numenjs/triggers':
         specifier: workspace:*
         version: link:../triggers
+      '@numenjs/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       '@vitejs/plugin-vue-jsx':
         specifier: 5.1.6
         version: 5.1.6(vite@7.3.6(@cordiverse/tsx@4.19.3-fix.3)(@types/node@22.20.1)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
@@ -628,12 +796,24 @@ importers:
       '@numenjs/integration-demo':
         specifier: workspace:*
         version: link:../integration-demo
+      '@numenjs/integration-feishu':
+        specifier: workspace:*
+        version: link:../integration-feishu
+      '@numenjs/integration-github':
+        specifier: workspace:*
+        version: link:../integration-github
       '@numenjs/integration-http':
         specifier: workspace:*
         version: link:../integration-http
       '@numenjs/integration-mqtt':
         specifier: workspace:*
         version: link:../integration-mqtt
+      '@numenjs/integration-rss':
+        specifier: workspace:*
+        version: link:../integration-rss
+      '@numenjs/integration-run-events':
+        specifier: workspace:*
+        version: link:../integration-run-events
       '@numenjs/integration-schedule':
         specifier: workspace:*
         version: link:../integration-schedule
@@ -690,12 +870,28 @@ importers:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8(patch_hash=3d4000827fa49a241290f4d9fa50be51ca166f1f60e7c2d7c18ddcc71e3758f6)(@cordisjs/plugin-loader@1.0.0-rc.5)
     devDependencies:
+      '@numenjs/config':
+        specifier: workspace:*
+        version: link:../config
       '@numenjs/credentials':
         specifier: workspace:*
         version: link:../credentials
+      '@numenjs/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       schemastery:
         specifier: ^3.18.0
         version: 3.18.0
+
+  packages/trigger-ui:
+    dependencies:
+      '@numenjs/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.41(typescript@5.9.3)
 
   packages/triggers:
     dependencies:
@@ -797,6 +993,9 @@ importers:
       '@numenjs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
+      '@numenjs/trigger-ui':
+        specifier: workspace:*
+        version: link:../trigger-ui
       '@numenjs/triggers':
         specifier: workspace:*
         version: link:../triggers
@@ -1681,6 +1880,10 @@ packages:
   '@pnpm/deps.graph-sequencer@1100.0.1':
     resolution: {integrity: sha512-pOr5+q1fLYKwFN3LAJuGZEnfXDcQ73zqgDHMtGy+K+uIoUqyY+6MeDCWFwfu+4EFuq76I5EPFofoNAI+Bmmq4A==}
     engines: {node: '>=22.13'}
+
+  '@rgrove/parse-xml@4.2.0':
+    resolution: {integrity: sha512-UuBOt7BOsKVOkFXRe4Ypd/lADuNIfqJXv8GvHqtXaTYXPPKkj2nS2zPllVsrtRjcomDhIJVBnZwfmlI222WH8g==}
+    engines: {node: '>=14.0.0'}
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
@@ -3757,6 +3960,8 @@ snapshots:
       playwright: 1.63.0
 
   '@pnpm/deps.graph-sequencer@1100.0.1': {}
+
+  '@rgrove/parse-xml@4.2.0': {}
 
   '@rolldown/pluginutils@1.0.1': {}
 

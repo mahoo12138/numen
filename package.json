@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "build": "pnpm --filter @numenjs/components build && tsc -b && pnpm --filter @numenjs/workbench build:app && pnpm --filter @numenjs/integration-webhook build:app",
+    "build": "pnpm --filter @numenjs/components build && tsc -b && pnpm --filter @numenjs/workbench build:app && pnpm --filter @numenjs/integration-webhook build:app && pnpm --filter @numenjs/integration-github build:app",
     "clean": "tsc -b --clean",
     "numen": "tsx packages/cli/src/bin.ts",
     "dev": "pnpm numen start",
