@@ -3,8 +3,22 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { parse, stringify } from 'yaml'
+import { consoleBuiltin, legacyConsoleNames, legacyWorkbenchNames, workbenchBuiltin } from './builtins.js'
 import { withConfigFileLock } from './persistence.js'
 import type { LoadedConfig, NumenConfig, PluginConfig, RuntimeEntry } from './types.js'
+
+export {
+  consoleBuiltin,
+  legacyBuiltinFamily,
+  legacyBuiltinNames,
+  legacyConsoleNames,
+  legacyWorkbenchNames,
+  workbenchBuiltin,
+  type LegacyBuiltinLeaf,
+  type LegacyConsoleName,
+  type LegacyProductBuiltin,
+  type LegacyWorkbenchName,
+} from './builtins.js'
 
 export class ConfigError extends Error {
   override name = 'ConfigError'
@@ -12,10 +26,12 @@ export class ConfigError extends Error {
 
 export const maxGroupDepth = 16
 export const maxPluginEntries = 1000
-export const legacyConsoleNames = ['console', 'consoleEntries', 'consoleAuth', 'consoleSession', 'consoleAssets', 'consoleHttp', 'consoleWs'] as const
-export const legacyWorkbenchNames = ['workbench', 'workbenchAutomationAuthoring', 'workbenchAutomationActivation', 'workbenchAutomationCatalog', 'workbenchAutomations', 'workbenchConnections', 'workbenchCredentials', 'workbenchHome', 'workbenchLogs', 'workbenchInvalidation', 'workbenchRuns'] as const
 const legacyLeaves = new Set<string>([...legacyConsoleNames.slice(1), ...legacyWorkbenchNames.slice(1)])
-const productPackages = new Map([['@numenjs/console', 'console'], ['@numenjs/workbench', 'workbench'], ['@numenjs/workbench/plugin', 'workbench']])
+const productPackages = new Map([
+  [consoleBuiltin.packageName, consoleBuiltin.product],
+  [workbenchBuiltin.packageName, workbenchBuiltin.product],
+  ['@numenjs/workbench/plugin', workbenchBuiltin.product],
+])
 
 function assertRecord(value: unknown, path: string): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ConfigError(`${path} must be an object`)
