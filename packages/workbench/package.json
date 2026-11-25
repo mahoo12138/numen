@@ -53,6 +53,7 @@
     "@numenjs/i18n": "workspace:*",
     "@numenjs/logging": "workspace:*",
     "@numenjs/scheduler": "workspace:*",
+    "@numenjs/trigger-ui": "workspace:*",
     "@numenjs/triggers": "workspace:*",
     "@numenjs/webui": "workspace:*",
     "@vue-flow/core": "1.48.2",
