@@ -1,0 +1,26 @@
+{
+  "name": "@numenjs/integration-run-events",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "peerDependencies": { "cordis": "4.0.0-rc.8" },
+  "dependencies": {
+    "@numenjs/core": "workspace:*",
+    "@numenjs/scheduler": "workspace:*",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@numenjs/automation": "workspace:*",
+    "@numenjs/connections": "workspace:*",
+    "@numenjs/credentials": "workspace:*",
+    "@numenjs/database": "workspace:*",
+    "@numenjs/resources": "workspace:*",
+    "@numenjs/triggers": "workspace:*",
+    "@numenjs/integration-smtp": "workspace:*"
+  }
+}
