@@ -1,0 +1,17 @@
+{
+  "name": "@numenjs/integration-rss",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "peerDependencies": { "cordis": "4.0.0-rc.8" },
+  "dependencies": {
+    "@numenjs/core": "workspace:*",
+    "@numenjs/http": "workspace:*",
+    "@numenjs/logging": "workspace:*",
+    "@rgrove/parse-xml": "4.2.0",
+    "schemastery": "^3.18.0"
+  }
+}
