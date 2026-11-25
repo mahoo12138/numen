@@ -1,48 +1,55 @@
-import { withLogContext } from '@numenjs/logging'
 import '@numenjs/automation'
-import { AutomationArchivedError, AutomationNotFoundError, AutomationRevisionNotFoundError } from '@numenjs/automation'
-import { ConnectionBindingError, ConnectionRuntimeUnavailableError, type ConnectionService } from '@numenjs/connections'
+import '@numenjs/database'
+import '@numenjs/resources'
 import {
-  capabilityKey,
-  isSupportedAutomationVersion,
-  resolveAutomationInputs,
-  isNumenValue,
-  isResourceRef,
+  clockOf,
   type Attempt,
-  type AutomationSource,
-  type AutomationExecutionSnapshot,
   type CancellationReason,
-  type ContractSnapshotCapability,
-  type ControlSource,
-  type CoreInstruction,
   type Execution,
-  type GraphEdge,
   type LocalTestRequest,
   type NumenValue,
+  type ReplayPreview,
+  type ReplayTarget,
   type Run,
+  type RunAttentionFilters,
+  type RunAttentionItem,
+  type RunAttentionPage,
   type RunEvent,
+  type StartReplayRequest,
   type TriggerAcceptance,
   type TriggerBinding,
   type TriggerEmission,
 } from '@numenjs/core'
-import '@numenjs/database'
-import '@numenjs/resources'
 import { Service, type Context } from 'cordis'
-import { createHash, randomUUID } from 'node:crypto'
-import { evaluateExpression, type EvaluationBindings } from './evaluator.js'
-import { assertDraftTestRequestValues, collectRunResourceIds, collectSnapshotResourceIds, draftTestAcceptanceLimits } from './resource-references.js'
+import type { EvaluationBindings } from './evaluator.js'
+import { AttentionService } from './attention.js'
+import { ReplayService } from './replay.js'
+import {
+  RunInspectionRepository,
+  type ExecutionListCursor,
+  type RunEventPage,
+  type RunExecutionDiagnosticsPage,
+  type RunGraphMemberSummary,
+  type RunListCursor,
+  type RunListFilters,
+  type RunStatusCounts,
+  type RunSummaryPage,
+  type SchedulerCounts,
+} from './repository/inspection.js'
+import { RunJournal } from './repository/journal.js'
+import { AdmissionRepository } from './repository/admissions.js'
+import { ScopeRepository } from './repository/scopes.js'
+import { SchedulerKernel } from './scheduler-kernel.js'
+import { SchedulerAdmission } from './scheduler-admission.js'
+import { SchedulerExecutionEngine } from './scheduler-engine.js'
+import { SchedulerRecovery } from './scheduler-recovery.js'
+import { StructuredScopes } from './scheduler-structured.js'
 
-export class ManualRunRevisionConflictError extends Error {
-  constructor() { super('The active Revision changed. Reload the run form before submitting.'); this.name = 'ManualRunRevisionConflictError' }
-}
-
-export class ManualRunRequestConflictError extends Error {
-  constructor() { super('The manual Run request ID was already used with different content.'); this.name = 'ManualRunRequestConflictError' }
-}
-
-export class DraftTestResourceUnavailableError extends Error {
-  constructor(cause: unknown) { super('A referenced resource is unavailable.', { cause }); this.name = 'DraftTestResourceUnavailableError' }
-}
+export {
+  ManualRunRequestConflictError,
+  ManualRunRevisionConflictError,
+  DraftTestResourceUnavailableError,
+} from './scheduler-admission.js'
 
 export interface SchedulerConfig {
   autoDispatch?: boolean
@@ -50,60 +57,22 @@ export interface SchedulerConfig {
   maxConcurrentExecutions?: number
 }
 
-export interface SchedulerHealth {
+export interface SchedulerHealth extends SchedulerCounts {
   ready: boolean
-  queuedRuns: number
-  runningRuns: number
-  cancellingRuns: number
-  runnableExecutions: number
-  waitingExecutions: number
-  blockedExecutions: number
 }
 
-export interface RunListCursor {
-  createdAt: string
-  id: string
-}
-
-export interface RunListFilters {
-  automationId?: string
-  status?: Run['status']
-}
-
-export interface RunSummary extends Run {
-  executionCount: number
-  attemptCount: number
-}
-
-export interface RunSummaryPage {
-  items: RunSummary[]
-  nextCursor?: RunListCursor
-}
-
-export type RunStatusCounts = Record<Run['status'], number>
-
-export interface ExecutionListCursor {
-  createdAt: string
-  id: string
-}
-
-export interface RunExecutionDiagnostic {
-  execution: Execution
-  attempts: Attempt[]
-}
-
-export interface RunExecutionDiagnosticsPage {
-  items: RunExecutionDiagnostic[]
-  statusCounts: Record<Execution['status'], number>
-  attemptCount: number
-  nextCursor?: ExecutionListCursor
-}
-
-export interface RunEventPage {
-  items: RunEvent[]
-  total: number
-  nextCursor?: number
-}
+export type {
+  ExecutionListCursor,
+  RunEventPage,
+  RunExecutionDiagnostic,
+  RunExecutionDiagnosticsPage,
+  RunGraphMemberSummary,
+  RunListCursor,
+  RunListFilters,
+  RunStatusCounts,
+  RunSummary,
+  RunSummaryPage,
+} from './repository/inspection.js'
 
 export interface RunInstructionExecutionSummary {
   instructionId: string
@@ -112,276 +81,29 @@ export interface RunInstructionExecutionSummary {
   latestUpdatedAt: string
 }
 
-export interface RunGraphMemberSummary {
-  scopeExecutionId: string
-  nodeId: string
-  executionId?: string
-  status: Execution['status'] | 'PENDING' | 'SKIPPED'
-  blockedReason?: string
-  updatedAt: string
-}
-
 export interface RunInspection {
   context: EvaluationBindings
   instructionExecutions: RunInstructionExecutionSummary[]
   graphMembers: RunGraphMemberSummary[]
 }
 
-interface RunRow {
-  id: string
-  automation_id: string
-  revision_id: string
-  status: Run['status']
-  trigger_json: string
-  input_json: string
-  group_key: string | null
-  cancel_reason: CancellationReason | null
-  created_at: string
-  started_at: string | null
-  finished_at: string | null
-}
-
-interface RunSummaryRow extends RunRow {
-  execution_count: number
-  attempt_count: number
-}
-
-interface AdmissionRow extends RunRow {
-  sequence: number
-  max_active: number | null
-  overflow: 'queue' | 'drop' | 'replace'
-  namespace: 'formal' | 'test'
-  replacement_requested: number
-}
-
-interface ExecutionRow {
-  id: string
-  run_id: string
-  instruction_id: string
-  parent_execution_id: string | null
-  scope_execution_id: string | null
-  scope_branch: number | null
-  loop_item_json: string | null
-  loop_index: number | null
-  status: Execution['status']
-  resolved_input_json: string | null
-  output_json: string | null
-  sample_id: string | null
-  wake_at: string | null
-  blocked_reason: string | null
-  generation: number
-  created_at: string
-  updated_at: string
-}
-
-interface GraphMemberRow {
-  scope_execution_id: string
-  node_id: string
-  execution_id: string | null
-  skipped: number
-  updated_at: string
-  status: Execution['status'] | null
-  output_json: string | null
-  blocked_reason: string | null
-}
-
-type GraphScopeInstruction = Extract<CoreInstruction, { op: 'graph_scope' }>
-type GraphEdgeValue = { state: 'pending' | 'skipped' } | { state: 'completed'; value: NumenValue }
-
-const structuredInstructionOps = new Set(['invoke', 'eval', 'branch', 'suspend', 'fork', 'iterate', 'scope_complete', 'join', 'complete', 'fail'])
-const graphInstructionOps = new Set(['graph_scope', 'graph_condition', 'graph_merge', 'graph_iterate', 'graph_value'])
-
-function assertSupportedSnapshot(snapshot: AutomationExecutionSnapshot): void {
-  if (!isSupportedAutomationVersion(snapshot.protocolVersion, snapshot.irVersion)
-    || snapshot.compiledPlan.irVersion !== snapshot.irVersion) {
-    throw new Error(`unsupported execution snapshot protocol/IR ${snapshot.protocolVersion}/${snapshot.irVersion}/${snapshot.compiledPlan.irVersion}`)
-  }
-  if (snapshot.purpose === 'draft-test' && snapshot.localTest
-    && (snapshot.protocolVersion !== 2 || snapshot.irVersion !== 2 || snapshot.localTest.version !== 1)) {
-    throw new Error('unsupported local test snapshot protocol or scope version')
-  }
-  for (const instruction of Object.values(snapshot.compiledPlan.instructions)) {
-    if (!instruction || (!structuredInstructionOps.has(instruction.op)
-      && !(snapshot.irVersion === 2 && graphInstructionOps.has(instruction.op)))) {
-      throw new Error(`unsupported execution instruction ${instruction?.op} for IR ${snapshot.irVersion}`)
-    }
-    if (instruction.op === 'graph_value') {
-      const sample = snapshot.purpose === 'draft-test' && snapshot.localTest?.version === 1
-        ? snapshot.localTest.samples.find(item => item.id === instruction.sampleId && item.nodeId === instruction.id) : undefined
-      if (snapshot.protocolVersion !== 2 || !sample || canonicalize(sample.value) !== canonicalize(instruction.value)) {
-        throw new Error('sample substitutions require an explicit immutable local test snapshot')
-      }
-    }
-  }
-  if (snapshot.irVersion === 1) {
-    const pending: ControlSource[] = [snapshot.source.flow]
-    while (pending.length) {
-      const control = pending.pop()!
-      switch (control.type) {
-        case 'graph': throw new Error('Graph source requires protocol/IR 2')
-        case 'block': pending.push(...control.steps); break
-        case 'if': pending.push(control.then); if (control.else) pending.push(control.else); break
-        case 'parallel': case 'race': pending.push(...control.branches); break
-        case 'foreach': pending.push(control.body); break
-      }
-    }
-  }
-}
-
-interface AttemptRow {
-  id: string
-  execution_id: string
-  number: number
-  status: Attempt['status']
-  provider_ref: string
-  error_json: string | null
-  started_at: string
-  finished_at: string | null
-}
-
-interface EventRow {
-  run_id: string
-  sequence: number
-  type: string
-  payload_json: string
-  occurred_at: string
-}
-
-interface IterationRow {
-  iterate_execution_id: string
-  item_index: number
-  item_json: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
-  root_execution_id: string | null
-  terminal_execution_id: string | null
-  error_json: string | null
-  created_at: string
-  updated_at: string
-}
-
-declare module 'cordis' {
-  interface Context {
-    scheduler: SchedulerService
-  }
-
-  interface Events {
-    'numen/run-change'(runId: string): void
-  }
-}
-
-function id(prefix: string): string {
-  return `${prefix}_${randomUUID().replaceAll('-', '')}`
-}
-
-function parseJson<T>(source: string): T {
-  return JSON.parse(source) as T
-}
-
-function canonicalize(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`
-  const object = value as Record<string, unknown>
-  return `{${Object.keys(object).sort().map(key => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`
-}
-
-function mapRun(row: RunRow): Run {
-  return {
-    id: row.id,
-    automationId: row.automation_id,
-    revisionId: row.revision_id,
-    status: row.status,
-    trigger: parseJson(row.trigger_json),
-    input: parseJson(row.input_json),
-    ...(row.group_key ? { groupKey: row.group_key } : {}),
-    ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}),
-    createdAt: row.created_at,
-    ...(row.started_at ? { startedAt: row.started_at } : {}),
-    ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
-  }
-}
-
-function mapExecution(row: ExecutionRow): Execution {
-  return {
-    id: row.id,
-    runId: row.run_id,
-    instructionId: row.instruction_id,
-    ...(row.parent_execution_id ? { parentExecutionId: row.parent_execution_id } : {}),
-    ...(row.scope_execution_id ? { scopeExecutionId: row.scope_execution_id } : {}),
-    ...(row.scope_branch === null ? {} : { scopeBranch: row.scope_branch }),
-    ...(row.loop_item_json ? { loopItem: parseJson(row.loop_item_json) } : {}),
-    ...(row.loop_index === null ? {} : { loopIndex: row.loop_index }),
-    status: row.status,
-    ...(row.resolved_input_json ? { resolvedInput: parseJson(row.resolved_input_json) } : {}),
-    ...(row.output_json ? { output: parseJson(row.output_json) } : {}),
-    ...(row.sample_id ? { sampleId: row.sample_id } : {}),
-    ...(row.wake_at ? { wakeAt: row.wake_at } : {}),
-    ...(row.blocked_reason ? { blockedReason: row.blocked_reason } : {}),
-    generation: row.generation,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }
-}
-
-function mapAttempt(row: AttemptRow): Attempt {
-  return {
-    id: row.id,
-    executionId: row.execution_id,
-    number: row.number,
-    status: row.status,
-    providerRef: row.provider_ref,
-    ...(row.error_json ? { error: parseJson(row.error_json) } : {}),
-    startedAt: row.started_at,
-    ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
-  }
-}
-
-function mapEvent(row: EventRow): RunEvent {
-  return {
-    runId: row.run_id,
-    sequence: row.sequence,
-    type: row.type,
-    payload: parseJson(row.payload_json),
-    occurredAt: row.occurred_at,
-  }
-}
-
-function errorValue(error: unknown): NumenValue {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message }
-  }
-  return { name: 'Error', message: String(error) }
-}
-
-class InvocationTimeoutError extends Error {
-  override name = 'InvocationTimeoutError'
-}
-
-class InvocationCancelledError extends Error {
-  override name = 'InvocationCancelledError'
-
-  constructor(public readonly reason: CancellationReason) {
-    super(`invocation cancelled: ${reason}`)
-  }
-}
-
-interface ActiveInvocation {
-  runId: string
-  controller: AbortController
-}
-
+/**
+ * Public Scheduler facade. Admission, execution, structured scopes and restart
+ * recovery are separate collaborators; this class keeps the stable service
+ * surface, the dispatch loop, and the event/notification fan-out.
+ */
 export class SchedulerService extends Service {
   static inject = ['database', 'capabilities', 'automations', 'resources']
 
-  private ready = false
+  private readonly kernel: SchedulerKernel
+  private readonly admission: SchedulerAdmission
+  private readonly recovery: SchedulerRecovery
+  private readonly engine: SchedulerExecutionEngine
+  private readonly structured: StructuredScopes
+  private readonly attention: AttentionService
+  private readonly replay: ReplayService
   private dispatchTask: Promise<number> | undefined
-  private readonly activeInvocations = new Map<string, ActiveInvocation>()
   private readonly activeExecutionTasks = new Map<string, Promise<void>>()
-  // An abort ends the guarded execution, but an uncooperative Provider may still be
-  // running. Keep its Run's permit until the actual invocation settles locally.
-  private readonly pendingProviders = new Map<Promise<unknown>, string>()
-  private wakeDispatch: (() => void) | undefined
-  private readonly pendingRunChanges = new Set<string>()
-  private runChangeScheduled = false
   private readonly autoDispatch: boolean
   private readonly sweepIntervalMs: number
   private readonly maxConcurrentExecutions: number
@@ -394,29 +116,79 @@ export class SchedulerService extends Service {
     if (!Number.isSafeInteger(this.maxConcurrentExecutions) || this.maxConcurrentExecutions < 1) {
       throw new TypeError('scheduler.maxConcurrentExecutions must be a positive integer')
     }
+
+    this.kernel = new SchedulerKernel(
+      ctx,
+      new RunInspectionRepository(ctx.database),
+      new RunJournal(ctx.database),
+      new AdmissionRepository(ctx.database),
+      new ScopeRepository(ctx.database),
+      this.autoDispatch,
+    )
+
+    this.engine = new SchedulerExecutionEngine(this.kernel, {
+      providerSettled: () => {
+        this.kernel.wakeDispatch?.()
+        if (this.autoDispatch) this.kick()
+      },
+    })
+    this.structured = new StructuredScopes(this.kernel, this.engine)
+    this.engine.structured = this.structured
+    this.recovery = new SchedulerRecovery(this.kernel)
+    this.admission = new SchedulerAdmission(this.kernel, this.engine, { kick: () => this.kick() })
+    this.admission.recovery = this.recovery
+
+    this.attention = new AttentionService(ctx, {
+      acceptTrigger: (binding, emission) => this.acceptTrigger(binding, emission),
+      changed: runId => this.kernel.scheduleRunChange(runId),
+    })
+    this.kernel.attention = this.attention
+    this.replay = new ReplayService(ctx, {
+      getRun: runId => this.getRun(runId),
+      freezeAdmission: (...args) => this.admission.freezeAdmission(...args),
+      appendEvent: (...args) => this.kernel.appendEvent(...args),
+      onAccepted: runId => { this.kernel.scheduleRunChange(runId); if (this.autoDispatch) this.kick() },
+    })
   }
 
   async *[Service.init]() {
-    this.recoverAdmissions()
-    this.recoverCancellations()
-    this.recoverInterruptedWork()
-    this.recoverStructuredScopes()
-    this.reconcileGraphScopes()
-    this.ready = true
+    this.admission.recoverAdmissions()
+    this.recovery.recoverCancellations()
+    this.recovery.recoverInterruptedWork()
+    this.structured.recoverStructuredScopes()
+    this.structured.reconcileGraphScopes()
+    this.kernel.ready = true
     let timer: NodeJS.Timeout | undefined
     if (this.autoDispatch) {
       this.ctx.on('numen/capability-change', () => this.kick())
-      if (this.connectionService()) this.ctx.on('numen/connection-runtime-change', () => this.kick())
+      if (this.kernel.connectionService()) this.ctx.on('numen/connection-runtime-change', () => this.kick())
       timer = setInterval(() => this.kick(), this.sweepIntervalMs)
       timer.unref()
       queueMicrotask(() => this.kick())
     }
     yield () => {
-      this.ready = false
-      this.wakeDispatch?.()
+      this.kernel.ready = false
+      this.kernel.wakeDispatch?.()
       if (timer) clearInterval(timer)
     }
   }
+
+  private get inspection(): RunInspectionRepository { return this.kernel.inspection }
+  private get journal(): RunJournal { return this.kernel.journal }
+
+  // Attention and Replay
+
+  listAttention(filters: RunAttentionFilters = {}): RunAttentionPage { return this.attention.list(filters) }
+
+  acknowledgeAttention(id: string, acknowledged = true): RunAttentionItem | undefined { return this.attention.acknowledge(id, acknowledged) }
+
+  dispatchAttention(binding: TriggerBinding): number { return this.attention.dispatch(binding) }
+
+  previewReplay(sourceRunId: string, target: ReplayTarget = 'original'): ReplayPreview { return this.replay.previewReplay(sourceRunId, target) }
+
+  startReplay(request: StartReplayRequest): Promise<Run> { return this.replay.startReplay(request) }
+
+  // Run acceptance
 
   startManual(
     automationId: string,
@@ -425,7 +197,7 @@ export class SchedulerService extends Service {
     expectedRevisionId?: string,
     requestId?: string,
   ): Run {
-    return this.startRequestedRun(automationId, { mode: 'manual', ...(expectedRevisionId === undefined ? {} : { revisionId: expectedRevisionId }) }, input, trigger, requestId)
+    return this.admission.startRequestedRun(automationId, { mode: 'manual', ...(expectedRevisionId === undefined ? {} : { revisionId: expectedRevisionId }) }, input, trigger, requestId)
   }
 
   /** Runs an immutable published Revision without activating it or touching Trigger subscriptions. */
@@ -436,7 +208,7 @@ export class SchedulerService extends Service {
     trigger: NumenValue,
     requestId: string,
   ): Run {
-    return this.startRequestedRun(automationId, { mode: 'revision-test', revisionId }, input, trigger, requestId)
+    return this.admission.startRequestedRun(automationId, { mode: 'revision-test', revisionId }, input, trigger, requestId)
   }
 
   /** Accepts a fixed saved Draft without publishing it or changing activation. */
@@ -447,240 +219,15 @@ export class SchedulerService extends Service {
     trigger: NumenValue,
     requestId: string,
   ): Promise<Run> {
-    return this.startTest(automationId, expectedDraftVersion, input, trigger, requestId)
+    return this.admission.startTest(automationId, expectedDraftVersion, input, trigger, requestId)
   }
 
   startLocalTest(input: LocalTestRequest & { previewHash: string; requestId: string }): Promise<Run> {
-    const { previewHash, requestId, ...request } = structuredClone(input)
-    if (!/^[a-f0-9]{64}$/.test(previewHash)) throw new TypeError('A reviewed local test preview is required.')
-    return this.startTest(request.automationId, request.expectedDraftVersion, request.input, request.trigger, requestId, { request, previewHash })
-  }
-
-  private async startTest(
-    automationId: string,
-    expectedDraftVersion: number,
-    input: Record<string, NumenValue>,
-    trigger: NumenValue,
-    requestId: string,
-    localTest?: { request: LocalTestRequest; previewHash: string },
-  ): Promise<Run> {
-    if (!Number.isSafeInteger(expectedDraftVersion) || expectedDraftVersion < 1) throw new TypeError('invalid expected Draft version')
-    if (!/^[a-zA-Z0-9_-]{16,80}$/.test(requestId)) throw new TypeError('invalid manual Run request id')
-    assertDraftTestRequestValues(input, trigger)
-    // Freeze the complete raw request across the asynchronous physical-resource preflight.
-    const rawInput = structuredClone(input)
-    const acceptedTrigger = structuredClone(trigger)
-    const contentHash = createHash('sha256').update(canonicalize({
-      mode: localTest ? 'local-test' : 'draft-test', automationId, expectedDraftVersion, input: rawInput, trigger: acceptedTrigger,
-      ...(localTest ? { localTest } : {}),
-    })).digest('hex')
-    const recoverAccepted = (): Run | undefined => {
-      const previous = this.ctx.database.db.prepare(
-        'SELECT content_hash, run_id FROM manual_run_requests WHERE request_id = ?',
-      ).get(requestId) as { content_hash: string; run_id: string } | undefined
-      if (!previous) return
-      if (previous.content_hash !== contentHash) throw new ManualRunRequestConflictError()
-      const run = this.getRun(previous.run_id)
-      if (!run) throw new Error(`accepted Run is missing: ${previous.run_id}`)
-      return run
-    }
-    const previous = recoverAccepted()
-    if (previous) return previous
-
-    try {
-      const prepared = localTest ? this.ctx.automations.prepareLocalTestSnapshot(localTest.request, localTest.previewHash)
-        : this.ctx.automations.prepareDraftTestSnapshot(automationId, expectedDraftVersion)
-      const resolvedInput = resolveAutomationInputs(prepared.source, rawInput)
-      const snapshotResources = collectSnapshotResourceIds(prepared)
-      const runResources = collectRunResourceIds(resolvedInput, acceptedTrigger)
-      const allResources = new Set([...snapshotResources, ...runResources])
-      if (allResources.size > draftTestAcceptanceLimits.maxResources) throw new TypeError('draft test references exceed the resource limit')
-      for (const resourceId of allResources) {
-        try { await this.ctx.resources.preflight(resourceId) } catch (cause) { throw new DraftTestResourceUnavailableError(cause) }
-      }
-      let created = false
-      const run = this.ctx.database.transaction(() => {
-        const duplicate = recoverAccepted()
-        if (duplicate) return duplicate
-        for (const resourceId of allResources) {
-          try { this.ctx.resources.assertAcceptable(resourceId) } catch (cause) { throw new DraftTestResourceUnavailableError(cause) }
-        }
-        // This rechecks Draft version/archive inside the same immediate transaction.
-        const snapshot = this.ctx.automations.createDraftTestSnapshot(prepared)
-        const acceptedRunId = id('run')
-        const now = new Date().toISOString()
-        for (const resourceId of snapshotResources) this.ctx.resources.commitOwner(resourceId, { type: 'snapshot', id: snapshot.id })
-        for (const resourceId of runResources) this.ctx.resources.commitOwner(resourceId, { type: 'run', id: acceptedRunId })
-        this.ctx.database.db.prepare(`
-          INSERT INTO runs (
-            id, automation_id, revision_id, status, trigger_json, input_json, created_at
-          ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
-        `).run(acceptedRunId, automationId, snapshot.id, JSON.stringify(acceptedTrigger), JSON.stringify(resolvedInput), now)
-        this.freezeAdmission(acceptedRunId, snapshot.source, acceptedTrigger, resolvedInput, 'test')
-        this.ctx.database.db.prepare(`
-          INSERT INTO manual_run_requests (request_id, content_hash, run_id) VALUES (?, ?, ?)
-        `).run(requestId, contentHash, acceptedRunId)
-        this.appendEvent(acceptedRunId, 'RunAccepted', {
-          source: localTest ? 'local-test' : 'draft-test', snapshotId: snapshot.id, revisionId: snapshot.id,
-          sourceDraftVersion: snapshot.sourceDraftVersion, requestId, contentHash,
-        }, now, false)
-        created = true
-        return this.getRun(acceptedRunId)!
-      })
-      if (created) {
-        this.scheduleRunChange(run.id)
-        if (this.autoDispatch) this.kick()
-      }
-      return run
-    } catch (error) {
-      // Another connection may have accepted this exact request while preflight awaited.
-      const accepted = recoverAccepted()
-      if (accepted) return accepted
-      throw error
-    }
-  }
-
-  private startRequestedRun(
-    automationId: string,
-    target: { mode: 'manual'; revisionId?: string } | { mode: 'revision-test'; revisionId: string },
-    input: Record<string, NumenValue>,
-    trigger: NumenValue,
-    requestId?: string,
-  ): Run {
-    if (!isNumenValue(input) || !isNumenValue(trigger)) throw new TypeError('run input and trigger must be Numen values')
-    if (requestId !== undefined && !/^[a-zA-Z0-9_-]{16,80}$/.test(requestId)) throw new TypeError('invalid manual Run request id')
-    const contentHash = requestId === undefined ? undefined : createHash('sha256').update(canonicalize({
-      automationId,
-      ...target,
-      input,
-      trigger,
-    })).digest('hex')
-    let created = false
-    const runId = this.ctx.database.transaction(() => {
-      if (requestId !== undefined) {
-        const previous = this.ctx.database.db.prepare(
-          'SELECT content_hash, run_id FROM manual_run_requests WHERE request_id = ?',
-        ).get(requestId) as { content_hash: string; run_id: string } | undefined
-        if (previous) {
-          if (previous.content_hash !== contentHash) throw new ManualRunRequestConflictError()
-          return previous.run_id
-        }
-      }
-      const automation = this.ctx.automations.get(automationId)
-      if (!automation) throw new AutomationNotFoundError(`automation not found: ${automationId}`)
-      if (automation.archivedAt) throw new AutomationArchivedError(`automation is archived: ${automationId}`)
-      if (target.mode === 'manual') {
-        if (!automation.activeRevisionId) throw new ManualRunRevisionConflictError()
-        if (target.revisionId !== undefined && automation.activeRevisionId !== target.revisionId) throw new ManualRunRevisionConflictError()
-      }
-      const revisionId = target.mode === 'revision-test' ? target.revisionId : automation.activeRevisionId!
-      const revision = this.ctx.automations.getRevision(revisionId)
-      if (!revision || revision.automationId !== automationId) throw new AutomationRevisionNotFoundError(`revision not found for automation: ${revisionId}`)
-      const resolvedInput = resolveAutomationInputs(revision.source, input)
-      const acceptedRunId = id('run')
-      const now = new Date().toISOString()
-      this.ctx.database.db.prepare(`
-        INSERT INTO runs (
-          id, automation_id, revision_id, status, trigger_json, input_json, created_at
-        ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
-      `).run(acceptedRunId, automationId, revision.id, JSON.stringify(trigger), JSON.stringify(resolvedInput), now)
-      this.freezeAdmission(acceptedRunId, revision.source, trigger, resolvedInput, target.mode === 'manual' ? 'formal' : 'test')
-      if (requestId !== undefined) {
-        this.ctx.database.db.prepare(`
-          INSERT INTO manual_run_requests (request_id, content_hash, run_id) VALUES (?, ?, ?)
-        `).run(requestId, contentHash, acceptedRunId)
-      }
-      this.appendEvent(acceptedRunId, 'RunAccepted', { source: target.mode, revisionId: revision.id, ...(requestId ? { requestId } : {}) }, now)
-      created = true
-      return acceptedRunId
-    })
-    if (created && this.autoDispatch) this.kick()
-    return this.getRun(runId)!
+    return this.admission.startLocalTest(input)
   }
 
   acceptTrigger(binding: TriggerBinding, emission: TriggerEmission): TriggerAcceptance {
-    if (!isNumenValue(emission.data)) throw new TypeError('trigger data must be a Numen value')
-    if (emission.checkpoint !== undefined && !isNumenValue(emission.checkpoint)) {
-      throw new TypeError('trigger checkpoint must be a Numen value')
-    }
-    if (emission.eventId !== undefined && !emission.eventId.trim()) {
-      throw new TypeError('trigger eventId must not be empty')
-    }
-    if (emission.subject !== undefined && !emission.subject.trim()) {
-      throw new TypeError('trigger subject must not be empty')
-    }
-    const acceptedAt = new Date().toISOString()
-    const occurredAt = emission.occurredAt === undefined
-      ? acceptedAt
-      : new Date(emission.occurredAt).toISOString()
-    let accepted = false
-    const result = this.ctx.database.transaction((): TriggerAcceptance => {
-      const automation = this.ctx.database.db.prepare(`
-        SELECT enabled, active_revision_id, activation_generation
-        FROM automations WHERE id = ?
-      `).get(binding.automationId) as {
-        enabled: number
-        active_revision_id: string | null
-        activation_generation: number
-      } | undefined
-      if (
-        !automation?.enabled
-        || automation.active_revision_id !== binding.revisionId
-        || automation.activation_generation !== binding.activationGeneration
-      ) {
-        return { status: 'stale' }
-      }
-
-      if (emission.eventId !== undefined) {
-        const duplicate = this.ctx.database.db.prepare(`
-          SELECT run_id FROM trigger_events
-          WHERE revision_id = ? AND trigger_id = ? AND event_id = ?
-        `).get(binding.revisionId, binding.triggerId, emission.eventId) as { run_id: string } | undefined
-        if (duplicate) return { status: 'duplicate', runId: duplicate.run_id }
-      }
-
-      const revision = this.ctx.automations.getRevision(binding.revisionId)!
-      const resolvedInput = resolveAutomationInputs(revision.source, {})
-      const runId = id('run')
-      const eventRowId = id('trigger')
-      this.ctx.database.db.prepare(`
-        INSERT INTO runs (
-          id, automation_id, revision_id, status, trigger_json, input_json, created_at
-        ) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)
-      `).run(runId, binding.automationId, binding.revisionId, JSON.stringify(emission.data), JSON.stringify(resolvedInput), acceptedAt)
-      this.freezeAdmission(runId, revision.source, emission.data, resolvedInput, 'formal')
-      this.ctx.database.db.prepare(`
-        INSERT INTO trigger_events (
-          id, automation_id, revision_id, activation_generation, trigger_id,
-          capability_id, capability_version, event_id, subject, data_json,
-          checkpoint_json, occurred_at, accepted_at, run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        eventRowId,
-        binding.automationId,
-        binding.revisionId,
-        binding.activationGeneration,
-        binding.triggerId,
-        binding.capability.id,
-        binding.capability.version,
-        emission.eventId ?? null,
-        emission.subject ?? null,
-        JSON.stringify(emission.data),
-        emission.checkpoint === undefined ? null : JSON.stringify(emission.checkpoint),
-        occurredAt,
-        acceptedAt,
-        runId,
-      )
-      this.appendEvent(runId, 'RunAccepted', {
-        source: 'trigger',
-        triggerId: binding.triggerId,
-        ...(emission.eventId === undefined ? {} : { eventId: emission.eventId }),
-      }, acceptedAt)
-      accepted = true
-      return { status: 'accepted', runId }
-    })
-    if (accepted && this.autoDispatch) this.kick()
-    return result
+    return this.admission.acceptTrigger(binding, emission)
   }
 
   cancelRun(runId: string, reason: CancellationReason = 'USER'): Run {
@@ -689,24 +236,21 @@ export class SchedulerService extends Service {
     if (existing.status === 'COMPLETED' || existing.status === 'FAILED' || existing.status === 'CANCELLED') {
       return existing
     }
-    const now = new Date().toISOString()
+    const now = clockOf(this.ctx).nowIso()
     this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE runs SET status = 'CANCELLING', cancel_reason = ?
-        WHERE id = ? AND status IN ('QUEUED', 'RUNNING')
-      `).run(reason, runId)
-      if (result.changes) this.appendEvent(runId, 'RunCancellationRequested', { reason }, now)
+      if (this.journal.requestRunCancellation(runId, reason)) this.kernel.appendEvent(runId, 'RunCancellationRequested', { reason }, now)
     })
     const cancellationReason = (this.getRun(runId)?.cancelReason as CancellationReason | undefined) ?? reason
-    this.propagateCancellation(runId, cancellationReason)
-    this.wakeDispatch?.()
+    this.recovery.propagateCancellation(runId, cancellationReason)
+    this.kernel.wakeDispatch?.()
     if (this.autoDispatch) this.kick()
     return this.getRun(runId)!
   }
 
+  // Inspection
+
   getRun(runId: string): Run | undefined {
-    const row = this.ctx.database.db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as RunRow | undefined
-    return row ? mapRun(row) : undefined
+    return this.inspection.getRun(runId)
   }
 
   inspectRun(runId: string): RunInspection | undefined {
@@ -724,19 +268,7 @@ export class SchedulerService extends Service {
       TIMED_OUT: 0,
     })
     const summaries = new Map<string, RunInstructionExecutionSummary>()
-    const rows = this.ctx.database.db.prepare(`
-      SELECT instruction_id, status, COUNT(*) AS count, MAX(updated_at) AS latest_updated_at,
-        SUM(CASE WHEN sample_id IS NOT NULL THEN 1 ELSE 0 END) AS sampled_count
-      FROM executions WHERE run_id = ?
-      GROUP BY instruction_id, status
-      ORDER BY instruction_id, status
-    `).all(runId) as Array<{
-      instruction_id: string
-      status: Execution['status']
-      count: number
-      sampled_count: number
-      latest_updated_at: string
-    }>
+    const rows = this.inspection.instructionExecutionCounts(runId)
     for (const row of rows) {
       const summary = summaries.get(row.instruction_id) ?? {
         instructionId: row.instruction_id,
@@ -749,7 +281,7 @@ export class SchedulerService extends Service {
       summaries.set(row.instruction_id, summary)
     }
     return {
-      context: this.createBindings(run),
+      context: this.kernel.createBindings(run),
       instructionExecutions: [...summaries.values()],
       graphMembers: this.listGraphMembers(runId),
     }
@@ -759,9 +291,7 @@ export class SchedulerService extends Service {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new TypeError('run list limit must be an integer between 1 and 100')
     }
-    return (this.ctx.database.db.prepare(`
-      SELECT * FROM runs ORDER BY created_at DESC, id DESC LIMIT ?
-    `).all(limit) as RunRow[]).map(mapRun)
+    return this.inspection.listRuns(limit)
   }
 
   listRunSummariesPage(limit = 20, cursor?: RunListCursor, filters: RunListFilters = {}): RunSummaryPage {
@@ -771,58 +301,15 @@ export class SchedulerService extends Service {
     if (cursor && (!cursor.createdAt || !cursor.id)) throw new TypeError('run summary cursor is invalid')
     if (filters.automationId !== undefined && (typeof filters.automationId !== 'string' || !filters.automationId)) throw new TypeError('automation filter is invalid')
     if (filters.status !== undefined && !['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLING', 'CANCELLED'].includes(filters.status)) throw new TypeError('run status filter is invalid')
-    const conditions: string[] = []
-    const parameters: Array<string | number> = []
-    if (filters.automationId) { conditions.push('automation_id = ?'); parameters.push(filters.automationId) }
-    if (filters.status) { conditions.push('status = ?'); parameters.push(filters.status) }
-    if (cursor) { conditions.push('(created_at < ? OR (created_at = ? AND id < ?))'); parameters.push(cursor.createdAt, cursor.createdAt, cursor.id) }
-    // Select the bounded page before aggregating potentially large Execution and Attempt histories.
-    const rows = this.ctx.database.db.prepare(`
-      WITH page AS (
-        SELECT * FROM runs ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-        ORDER BY created_at DESC, id DESC LIMIT ?
-      )
-      SELECT page.*, COUNT(DISTINCT executions.id) AS execution_count,
-        COUNT(attempts.id) AS attempt_count
-      FROM page
-      LEFT JOIN executions ON executions.run_id = page.id
-      LEFT JOIN attempts ON attempts.execution_id = executions.id
-      GROUP BY page.id
-      ORDER BY page.created_at DESC, page.id DESC
-    `).all(...parameters, limit + 1) as RunSummaryRow[]
-    const hasMore = rows.length > limit
-    const items = rows.slice(0, limit).map(row => ({
-      ...mapRun(row),
-      executionCount: row.execution_count,
-      attemptCount: row.attempt_count,
-    }))
-    const last = items.at(-1)
-    return {
-      items,
-      ...(hasMore && last ? { nextCursor: { createdAt: last.createdAt, id: last.id } } : {}),
-    }
+    return this.inspection.listRunSummariesPage(limit, cursor, filters)
   }
 
   getRunStatusCounts(automationId?: string): RunStatusCounts {
-    const counts: RunStatusCounts = {
-      QUEUED: 0,
-      RUNNING: 0,
-      COMPLETED: 0,
-      FAILED: 0,
-      CANCELLING: 0,
-      CANCELLED: 0,
-    }
-    const rows = this.ctx.database.db.prepare(`
-      SELECT status, COUNT(*) AS count FROM runs ${automationId ? 'WHERE automation_id = ?' : ''} GROUP BY status
-    `).all(...(automationId ? [automationId] : [])) as Array<{ status: Run['status']; count: number }>
-    for (const row of rows) counts[row.status] = row.count
-    return counts
+    return this.inspection.runStatusCounts(automationId)
   }
 
   getRunIdentity(runId: string): Pick<Run, 'id' | 'revisionId'> | undefined {
-    const row = this.ctx.database.db.prepare('SELECT id, revision_id FROM runs WHERE id = ?').get(runId) as
-      { id: string; revision_id: string } | undefined
-    return row ? { id: row.id, revisionId: row.revision_id } : undefined
+    return this.inspection.runIdentity(runId)
   }
 
   inspectExecution(runId: string, executionId: string, maxValueBytes = 65_536): {
@@ -830,51 +317,19 @@ export class SchedulerService extends Service {
   } | undefined {
     if (!Number.isSafeInteger(maxValueBytes) || maxValueBytes < 1 || maxValueBytes > 65_536) throw new TypeError('invalid execution inspection limit')
     // Bound JSON before parsing it. Loop values and errors are not part of this inspection surface.
-    const row = this.ctx.database.db.prepare(`
-      SELECT id, run_id, instruction_id, parent_execution_id, scope_execution_id, scope_branch,
-        NULL AS loop_item_json, loop_index, status, wake_at, blocked_reason, generation, sample_id, created_at, updated_at,
-        CASE WHEN length(CAST(resolved_input_json AS BLOB)) <= ? THEN resolved_input_json ELSE NULL END AS resolved_input_json,
-        CASE WHEN length(CAST(output_json AS BLOB)) <= ? THEN output_json ELSE NULL END AS output_json,
-        length(CAST(resolved_input_json AS BLOB)) > ? AS input_omitted,
-        length(CAST(output_json AS BLOB)) > ? AS output_omitted
-      FROM executions WHERE run_id = ? AND id = ?
-    `).get(maxValueBytes, maxValueBytes, maxValueBytes, maxValueBytes, runId, executionId) as
-      (ExecutionRow & { input_omitted: number; output_omitted: number }) | undefined
-    return row ? { execution: mapExecution(row), inputOmitted: !!row.input_omitted, outputOmitted: !!row.output_omitted } : undefined
+    return this.inspection.inspectExecution(runId, executionId, maxValueBytes)
   }
 
   getAttempt(runId: string, executionId: string, attemptId: string): Pick<Attempt, 'id' | 'executionId' | 'number' | 'status'> | undefined {
-    const row = this.ctx.database.db.prepare(`
-      SELECT attempts.id, attempts.execution_id, attempts.number, attempts.status FROM attempts JOIN executions ON executions.id = attempts.execution_id
-      WHERE executions.run_id = ? AND executions.id = ? AND attempts.id = ?
-    `).get(runId, executionId, attemptId) as AttemptRow | undefined
-    return row ? { id: row.id, executionId: row.execution_id, number: row.number, status: row.status } : undefined
+    return this.inspection.getAttempt(runId, executionId, attemptId)
   }
 
   listGraphMembers(runId: string): RunGraphMemberSummary[] {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT members.*, child.status, child.blocked_reason,
-        child.updated_at AS execution_updated_at, scope.status AS scope_status,
-        scope.updated_at AS scope_updated_at
-      FROM graph_members AS members
-      JOIN executions AS scope ON scope.id = members.scope_execution_id
-      LEFT JOIN executions AS child ON child.id = members.execution_id
-      WHERE scope.run_id = ? ORDER BY scope.created_at, scope.id, members.node_id
-    `).all(runId) as Array<GraphMemberRow & { execution_updated_at: string | null; scope_status: Execution['status']; scope_updated_at: string }>
-    return rows.map(row => ({
-      scopeExecutionId: row.scope_execution_id,
-      nodeId: row.node_id,
-      ...(row.execution_id ? { executionId: row.execution_id } : {}),
-      status: row.skipped ? 'SKIPPED' : row.status ?? (['CANCELLED', 'FAILED', 'TIMED_OUT'].includes(row.scope_status) ? 'CANCELLED' : 'PENDING'),
-      ...(row.blocked_reason ? { blockedReason: row.blocked_reason } : {}),
-      updatedAt: row.execution_updated_at ?? (row.skipped ? row.updated_at : row.scope_updated_at),
-    }))
+    return this.inspection.listGraphMembers(runId)
   }
 
   listExecutions(runId: string): Execution[] {
-    return (this.ctx.database.db.prepare(`
-      SELECT * FROM executions WHERE run_id = ? ORDER BY created_at, id
-    `).all(runId) as ExecutionRow[]).map(mapExecution)
+    return this.inspection.listExecutions(runId)
   }
 
   listExecutionDiagnosticsPage(
@@ -889,79 +344,15 @@ export class SchedulerService extends Service {
     if (cursor && (!cursor.createdAt || !cursor.id)) {
       throw new TypeError('execution diagnostics cursor is invalid')
     }
-    const instructionFilter = filter.instructionIds
-      ? `AND instruction_id IN (${filter.instructionIds.map(() => '?').join(', ') || 'NULL'})` : ''
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM executions
-      WHERE run_id = ?
-      ${instructionFilter}
-      ${filter.executionId ? 'AND id = ?' : ''}
-      ${cursor ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : ''}
-      ORDER BY created_at DESC, id DESC
-      LIMIT ?
-    `).all(runId, ...(filter.instructionIds ?? []), ...(filter.executionId ? [filter.executionId] : []), ...(cursor
-      ? [cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
-      : [limit + 1])) as ExecutionRow[]
-    const hasMore = rows.length > limit
-    const executions = rows.slice(0, limit).map(mapExecution)
-    const attemptsByExecution = new Map<string, Attempt[]>()
-    if (executions.length) {
-      const placeholders = executions.map(() => '?').join(', ')
-      const attempts = (this.ctx.database.db.prepare(`
-        SELECT * FROM attempts
-        WHERE execution_id IN (${placeholders})
-        ORDER BY execution_id, number
-      `).all(...executions.map(execution => execution.id)) as AttemptRow[]).map(mapAttempt)
-      for (const attempt of attempts) {
-        const items = attemptsByExecution.get(attempt.executionId) ?? []
-        items.push(attempt)
-        attemptsByExecution.set(attempt.executionId, items)
-      }
-    }
-    const statusCounts = {
-      RUNNABLE: 0,
-      RUNNING: 0,
-      WAITING: 0,
-      BLOCKED: 0,
-      COMPLETED: 0,
-      FAILED: 0,
-      CANCELLING: 0,
-      CANCELLED: 0,
-      TIMED_OUT: 0,
-    } satisfies Record<Execution['status'], number>
-    const statusRows = this.ctx.database.db.prepare(`
-      SELECT status, COUNT(*) AS count FROM executions WHERE run_id = ? GROUP BY status
-    `).all(runId) as Array<{ status: Execution['status']; count: number }>
-    for (const row of statusRows) statusCounts[row.status] = row.count
-    const attemptCount = (this.ctx.database.db.prepare(`
-      SELECT COUNT(*) AS count FROM attempts
-      JOIN executions ON executions.id = attempts.execution_id
-      WHERE executions.run_id = ?
-    `).get(runId) as { count: number }).count
-    const last = executions.at(-1)
-    return {
-      items: executions.map(execution => ({
-        execution,
-        attempts: attemptsByExecution.get(execution.id) ?? [],
-      })),
-      statusCounts,
-      attemptCount,
-      ...(hasMore && last ? { nextCursor: { createdAt: last.createdAt, id: last.id } } : {}),
-    }
+    return this.inspection.executionDiagnosticsPage(runId, limit, cursor, filter)
   }
 
   listAttempts(runId: string): Attempt[] {
-    return (this.ctx.database.db.prepare(`
-      SELECT attempts.* FROM attempts
-      JOIN executions ON executions.id = attempts.execution_id
-      WHERE executions.run_id = ? ORDER BY executions.created_at, attempts.number
-    `).all(runId) as AttemptRow[]).map(mapAttempt)
+    return this.inspection.listAttempts(runId)
   }
 
   listEvents(runId: string): RunEvent[] {
-    return (this.ctx.database.db.prepare(`
-      SELECT * FROM run_events WHERE run_id = ? ORDER BY sequence
-    `).all(runId) as EventRow[]).map(mapEvent)
+    return this.inspection.listEvents(runId)
   }
 
   listRunEventsPage(runId: string, limit = 50, beforeSequence?: number): RunEventPage {
@@ -971,43 +362,18 @@ export class SchedulerService extends Service {
     if (beforeSequence !== undefined && (!Number.isSafeInteger(beforeSequence) || beforeSequence < 1)) {
       throw new TypeError('run event cursor must be a positive integer')
     }
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM run_events
-      WHERE run_id = ? ${beforeSequence === undefined ? '' : 'AND sequence < ?'}
-      ORDER BY sequence DESC
-      LIMIT ?
-    `).all(runId, ...(beforeSequence === undefined ? [limit + 1] : [beforeSequence, limit + 1])) as EventRow[]
-    const hasMore = rows.length > limit
-    const items = rows.slice(0, limit).map(mapEvent)
-    const total = (this.ctx.database.db.prepare(`
-      SELECT COUNT(*) AS count FROM run_events WHERE run_id = ?
-    `).get(runId) as { count: number }).count
-    const last = items.at(-1)
-    return {
-      items,
-      total,
-      ...(hasMore && last ? { nextCursor: last.sequence } : {}),
-    }
+    return this.inspection.runEventsPage(runId, limit, beforeSequence)
   }
 
   health(): SchedulerHealth {
-    const count = (status: string, table = 'executions') => {
-      return (this.ctx.database.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE status = ?`).get(status) as { count: number }).count
-    }
-    return {
-      ready: this.ready,
-      queuedRuns: count('QUEUED', 'runs'),
-      runningRuns: count('RUNNING', 'runs'),
-      cancellingRuns: count('CANCELLING', 'runs'),
-      runnableExecutions: count('RUNNABLE'),
-      waitingExecutions: count('WAITING'),
-      blockedExecutions: count('BLOCKED'),
-    }
+    return { ready: this.kernel.ready, ...this.inspection.counts() }
   }
+
+  // Dispatch
 
   dispatchUntilIdle(maxTransitions = 1000): Promise<number> {
     if (this.dispatchTask) {
-      this.wakeDispatch?.()
+      this.kernel.wakeDispatch?.()
       return this.dispatchTask
     }
     const task = this.runDispatchLoop(maxTransitions)
@@ -1018,8 +384,8 @@ export class SchedulerService extends Service {
   }
 
   private kick(): void {
-    if (!this.ready) return
-    this.wakeDispatch?.()
+    if (!this.kernel.ready) return
+    this.kernel.wakeDispatch?.()
     queueMicrotask(() => {
       this.dispatchUntilIdle().catch(error => this.ctx.logger('scheduler').error(error))
     })
@@ -1027,25 +393,25 @@ export class SchedulerService extends Service {
 
   private async runDispatchLoop(maxTransitions: number): Promise<number> {
     let transitions = 0
-    while (this.ready && transitions < maxTransitions) {
+    while (this.kernel.ready && transitions < maxTransitions) {
       let progressed = false
-      const cancelled = this.reconcileCancellations()
-      const resumed = this.resumeDueTimers()
-      const unblocked = this.reconcileBlockedExecutions()
-      const graphs = this.reconcileGraphScopes()
+      const cancelled = this.recovery.reconcileCancellations()
+      const resumed = this.engine.resumeDueTimers()
+      const unblocked = this.engine.reconcileBlockedExecutions()
+      const graphs = this.structured.reconcileGraphScopes()
       if (cancelled || resumed || unblocked || graphs) {
         transitions += cancelled + resumed + unblocked + graphs
         progressed = true
       }
-      if (this.admitOneRun()) {
+      if (this.admission.admitOneRun()) {
         transitions += 1
         progressed = true
       }
       const availableSlots = this.maxConcurrentExecutions - this.activeExecutionTasks.size
-      const executions = availableSlots > 0 ? this.nextRunnableExecutions(availableSlots) : []
+      const executions = availableSlots > 0 ? this.journal.nextRunnableExecutions(availableSlots) : []
       if (executions.length) {
         for (const execution of executions) {
-          const task = this.execute(execution).finally(() => {
+          const task = this.engine.execute(execution).finally(() => {
             this.activeExecutionTasks.delete(execution.id)
           })
           this.activeExecutionTasks.set(execution.id, task)
@@ -1057,1704 +423,21 @@ export class SchedulerService extends Service {
       // New accepted Runs can wake this same loop while a Provider is pending.
       if (progressed) continue
       if (!this.activeExecutionTasks.size) return transitions
-      const wake = new Promise<void>(resolve => { this.wakeDispatch = resolve })
+      const wake = new Promise<void>(resolve => { this.kernel.wakeDispatch = resolve })
       try { await Promise.race([...this.activeExecutionTasks.values(), wake]) }
-      finally { this.wakeDispatch = undefined }
+      finally { this.kernel.wakeDispatch = undefined }
     }
-    if (!this.ready) return transitions
+    if (!this.kernel.ready) return transitions
     throw new Error(`scheduler exceeded ${maxTransitions} transitions without becoming idle`)
-  }
-
-  private appendEvent(runId: string, type: string, payload: NumenValue, occurredAt = new Date().toISOString(), notify = true): void {
-    const { sequence } = this.ctx.database.db.prepare(`
-      SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM run_events WHERE run_id = ?
-    `).get(runId) as { sequence: number }
-    this.ctx.database.db.prepare(`
-      INSERT INTO run_events (run_id, sequence, type, payload_json, occurred_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(runId, sequence, type, JSON.stringify(payload), occurredAt)
-    if (notify) this.scheduleRunChange(runId)
-  }
-
-  private readonly loggedRunStates = new Map<string, string>()
-
-  private scheduleRunChange(runId: string): void {
-    this.pendingRunChanges.add(runId)
-    if (this.runChangeScheduled) return
-    this.runChangeScheduled = true
-    queueMicrotask(() => {
-      this.runChangeScheduled = false
-      const runIds = [...this.pendingRunChanges]
-      this.pendingRunChanges.clear()
-      if (!this.ready) return
-      for (const changedRunId of runIds) {
-        const run = this.getRun(changedRunId)
-        if (run && this.loggedRunStates.get(run.id) !== run.status) {
-          this.loggedRunStates.set(run.id, run.status)
-          if (this.loggedRunStates.size > 2000) this.loggedRunStates.delete(this.loggedRunStates.keys().next().value!)
-          withLogContext({ runId: run.id, automationId: run.automationId, traceId: run.id }, () => {
-            this.ctx.logger('scheduler')[run.status === 'FAILED' ? 'warn' : 'info']('Run %s', run.status)
-          })
-        }
-        this.ctx.emit('numen/run-change', changedRunId)
-      }
-    })
-  }
-
-  private createExecution(
-    runId: string,
-    instructionId: string,
-    parentExecutionId?: string,
-    scopeExecutionId?: string,
-    scopeBranch?: number,
-    loopItem?: NumenValue,
-    loopIndex?: number,
-  ): string {
-    const executionId = id('exec')
-    const now = new Date().toISOString()
-    this.ctx.database.db.prepare(`
-      INSERT INTO executions (
-        id, run_id, instruction_id, parent_execution_id, scope_execution_id, scope_branch,
-        loop_item_json, loop_index,
-        status, generation, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RUNNABLE', 0, ?, ?)
-    `).run(
-      executionId,
-      runId,
-      instructionId,
-      parentExecutionId ?? null,
-      scopeExecutionId ?? null,
-      scopeBranch ?? null,
-      loopItem === undefined ? null : JSON.stringify(loopItem),
-      loopIndex ?? null,
-      now,
-      now,
-    )
-    this.appendEvent(runId, 'ExecutionCreated', { executionId, instructionId }, now)
-    return executionId
-  }
-
-  /** Runs inside the same immediate transaction as acceptance and its receipt. */
-  private freezeAdmission(
-    runId: string, source: AutomationSource, trigger: NumenValue,
-    input: Record<string, NumenValue>, namespace: 'formal' | 'test',
-  ): void {
-    const policy = source.policy
-    let groupKey = 'ungrouped'
-    try {
-      if (policy !== undefined && (!policy || typeof policy !== 'object' || Array.isArray(policy))) throw new Error()
-      if (policy?.maxActive !== undefined && (!Number.isSafeInteger(policy.maxActive) || policy.maxActive < 1)) throw new Error()
-      if (policy?.overflow !== undefined && !['queue', 'drop', 'replace'].includes(policy.overflow)) throw new Error()
-      if (policy?.groupBy !== undefined) {
-        // Published snapshots normally passed compilation. Validate reference roots
-        // again here for pre-migration snapshots and do not fabricate run bindings.
-        const check = (value: unknown): void => {
-          if (!value || typeof value !== 'object') return
-          const expression = value as Record<string, unknown>
-          if (expression.type === 'ref' && (typeof expression.path !== 'string' || !/^(trigger|input)(\.|$)/.test(expression.path))) throw new Error()
-          if (expression.type === 'template' && Array.isArray(expression.parts)) {
-            for (const part of expression.parts) {
-              if (typeof part !== 'string' && (!part || typeof part.ref !== 'string' || !/^(trigger|input)(\.|$)/.test(part.ref))) throw new Error()
-            }
-          }
-          if (expression.type === 'array' && Array.isArray(expression.items)) expression.items.forEach(check)
-          if (expression.type === 'object' && expression.entries && typeof expression.entries === 'object') Object.values(expression.entries).forEach(check)
-          if (expression.type === 'call' && Array.isArray(expression.arguments)) expression.arguments.forEach(check)
-        }
-        check(policy.groupBy)
-        const value = evaluateExpression(policy.groupBy, { trigger, input, run: {}, steps: {}, vars: {}, loop: {}, error: null })
-        groupKey = `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`
-      }
-    } catch {
-      // Neither the group value nor the input/trigger belongs in an error or log.
-      throw new TypeError('Cannot resolve the Run admission policy from trigger and input.')
-    }
-    this.ctx.database.db.prepare('UPDATE runs SET group_key = ? WHERE id = ?').run(groupKey, runId)
-    this.ctx.database.db.prepare(`
-      INSERT INTO run_admissions (run_id, max_active, overflow, namespace) VALUES (?, ?, ?, ?)
-    `).run(runId, policy?.maxActive ?? null, policy?.overflow ?? 'queue', namespace)
-  }
-
-  private recoverAdmissions(): void {
-    // Freeze legacy active Runs in their surviving insertion order, once. The
-    // durable sequence remains stable across future VACUUMs and restarts.
-    this.ctx.database.transaction(() => {
-      const rows = this.ctx.database.db.prepare(`
-        SELECT runs.* FROM runs LEFT JOIN run_admissions ON run_admissions.run_id = runs.id
-        WHERE runs.status IN ('QUEUED', 'RUNNING', 'CANCELLING') AND run_admissions.run_id IS NULL
-        ORDER BY runs.created_at, runs.rowid
-      `).all() as RunRow[]
-      for (const row of rows) {
-        const accepted = this.ctx.database.db.prepare(`
-          SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'RunAccepted' ORDER BY sequence LIMIT 1
-        `).get(row.id) as { payload_json: string } | undefined
-        let source: string | undefined
-        try { source = accepted ? parseJson<{ source?: string } | null>(accepted.payload_json)?.source : undefined } catch { /* Legacy receipts may be unavailable. */ }
-        const identity = this.ctx.database.db.prepare('SELECT purpose FROM automation_revisions WHERE id = ?').get(row.revision_id) as { purpose: string } | undefined
-        const namespace = identity?.purpose === 'draft-test' || source === 'draft-test' || source === 'local-test' || source === 'revision-test' ? 'test' : 'formal'
-        try {
-          const snapshot = this.ctx.automations.getExecutionSnapshot(row.revision_id)
-          if (!snapshot) throw new Error()
-          this.freezeAdmission(row.id, snapshot.source, parseJson(row.trigger_json), parseJson(row.input_json), namespace)
-        } catch {
-          if (row.status === 'QUEUED') {
-            this.failQueuedRun(row.id, { code: 'ADMISSION_RECOVERY_FAILED', message: 'Cannot recover the Run admission policy.' })
-          } else {
-            // Unknown legacy groups must count against every group in this scope;
-            // mapping them to the ordinary ungrouped key could bypass the limit.
-            this.ctx.database.db.prepare('UPDATE runs SET group_key = NULL WHERE id = ?').run(row.id)
-            this.ctx.database.db.prepare(`
-              INSERT INTO run_admissions (run_id, max_active, overflow, namespace) VALUES (?, NULL, 'queue', ?)
-            `).run(row.id, namespace)
-            this.appendEvent(row.id, 'AdmissionRecoveryFailed', { code: 'ADMISSION_RECOVERY_FAILED' })
-          }
-        }
-      }
-    })
-  }
-
-  private admitOneRun(): boolean {
-    const victims: string[] = []
-    const progressed = this.ctx.database.transaction(() => {
-      // Replacement reservations precede ordinary queue entries so the freed slot
-      // goes to the replacement, while existing queued Runs retain their order.
-      const reservations = new Set<string>()
-      const scopeKey = (row: AdmissionRow): string => JSON.stringify([row.automation_id, row.namespace, row.group_key])
-      const pendingRunIds = new Set(this.pendingProviders.values())
-      let cursor = { replacement: 1, sequence: 0 }
-      for (;;) {
-        const candidates = this.ctx.database.db.prepare(`
-          SELECT runs.*, run_admissions.* FROM runs JOIN run_admissions ON run_admissions.run_id = runs.id
-          WHERE runs.status = 'QUEUED' AND (replacement_requested < ? OR (replacement_requested = ? AND sequence > ?))
-          ORDER BY replacement_requested DESC, sequence LIMIT 64
-        `).all(cursor.replacement, cursor.replacement, cursor.sequence) as AdmissionRow[]
-        if (!candidates.length) return false
-        for (const row of candidates) {
-          cursor = { replacement: row.replacement_requested, sequence: row.sequence }
-          const scope = scopeKey(row)
-          const reserved = reservations.has(scope)
-          // A finite drop must be decided now, not kept until a replacement ends.
-          // An unlimited policy does not participate in capacity reservations.
-          if (reserved && row.max_active !== null && row.overflow !== 'drop') continue
-          if (row.replacement_requested) reservations.add(scope)
-          const revision = this.ctx.automations.getExecutionSnapshot(row.revision_id)
-          if (!revision) {
-            this.failQueuedRun(row.id, { code: 'REVISION_MISSING', revisionId: row.revision_id })
-            return true
-          }
-          try { assertSupportedSnapshot(revision) } catch (error) {
-            this.failQueuedRun(row.id, errorValue(error))
-            return true
-          }
-          const now = new Date().toISOString()
-          if (row.max_active !== null) {
-            const active = this.ctx.database.db.prepare(`
-              SELECT runs.*, run_admissions.* FROM runs JOIN run_admissions ON run_admissions.run_id = runs.id
-              WHERE runs.automation_id = ? AND namespace = ? AND (group_key = ? OR group_key IS NULL)
-                AND runs.started_at IS NOT NULL
-                AND (runs.status IN ('RUNNING', 'CANCELLING') OR runs.id IN (SELECT value FROM json_each(?)))
-              ORDER BY runs.started_at, sequence
-            `).all(row.automation_id, row.namespace, row.group_key, JSON.stringify([...pendingRunIds])) as AdmissionRow[]
-            if (active.length >= row.max_active || reserved) {
-              if (row.overflow === 'queue') continue
-              if (row.overflow === 'drop') {
-                this.ctx.database.db.prepare(`
-                  UPDATE runs SET status = 'CANCELLED', cancel_reason = 'OVERFLOW', finished_at = ? WHERE id = ? AND status = 'QUEUED'
-                `).run(now, row.id)
-                this.appendEvent(row.id, 'RunDropped', { reason: 'OVERFLOW', maxActive: row.max_active }, now)
-                this.appendEvent(row.id, 'RunCancelled', { reason: 'OVERFLOW' }, now)
-                return true
-              }
-              // Choose victims only once. A later unlimited Revision may enter
-              // while cancellation drains; it must not become an extra victim.
-              if (row.replacement_requested) continue
-              // Cancellation already in progress will free capacity. Do not cancel
-              // additional survivors while waiting for those Providers to settle.
-              const closing = active.filter(run => run.status !== 'RUNNING').length
-              const needed = Math.max(0, active.length - row.max_active + 1 - closing)
-              victims.push(...active.filter(run => run.status === 'RUNNING').slice(0, needed).map(run => run.id))
-              this.ctx.database.db.prepare('UPDATE run_admissions SET replacement_requested = 1 WHERE run_id = ?').run(row.id)
-              this.appendEvent(row.id, 'RunReplacementRequested', { maxActive: row.max_active }, now)
-              for (const runId of victims) {
-                this.ctx.database.db.prepare(`UPDATE runs SET status = 'CANCELLING', cancel_reason = 'REPLACED' WHERE id = ? AND status = 'RUNNING'`).run(runId)
-                this.appendEvent(runId, 'RunCancellationRequested', { reason: 'REPLACED', replacementRunId: row.id }, now)
-              }
-              return true
-            }
-          }
-          const result = this.ctx.database.db.prepare(`
-            UPDATE runs SET status = 'RUNNING', started_at = ? WHERE id = ? AND status = 'QUEUED'
-          `).run(now, row.id)
-          if (!result.changes) continue
-          this.appendEvent(row.id, 'RunStarted', { revisionId: row.revision_id }, now)
-          this.createExecution(row.id, revision.compiledPlan.entry)
-          return true
-        }
-      }
-    })
-    // Abort signals can invoke third-party listeners: never run them in the DB transaction.
-    for (const runId of victims) this.propagateCancellation(runId, 'REPLACED')
-    return progressed
-  }
-
-  private failQueuedRun(runId: string, error: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      this.ctx.database.db.prepare(`
-        UPDATE runs SET status = 'FAILED', finished_at = ? WHERE id = ? AND status = 'QUEUED'
-      `).run(now, runId)
-      this.appendEvent(runId, 'RunFailed', { error }, now)
-    })
-  }
-
-  private nextRunnableExecutions(limit: number): Execution[] {
-    return (this.ctx.database.db.prepare(`
-      SELECT executions.* FROM executions
-      JOIN runs ON runs.id = executions.run_id
-      WHERE executions.status = 'RUNNABLE' AND runs.status = 'RUNNING'
-      ORDER BY executions.created_at, executions.id
-      LIMIT ?
-    `).all(limit) as ExecutionRow[]).map(mapExecution)
-  }
-
-  private getExecutionRow(executionId: string): ExecutionRow | undefined {
-    return this.ctx.database.db.prepare('SELECT * FROM executions WHERE id = ?')
-      .get(executionId) as ExecutionRow | undefined
-  }
-
-  private getRevisionForExecution(execution: Execution): { run: Run; revision: AutomationExecutionSnapshot; instruction: CoreInstruction } {
-    const run = this.getRun(execution.runId)
-    if (!run) throw new Error(`run not found: ${execution.runId}`)
-    const revision = this.ctx.automations.getExecutionSnapshot(run.revisionId)
-    if (!revision) throw new Error(`revision not found: ${run.revisionId}`)
-    const instruction = revision.compiledPlan.instructions[execution.instructionId]
-    if (!instruction) throw new Error(`instruction not found: ${execution.instructionId}`)
-    return { run, revision, instruction }
-  }
-
-  private appendGraphBindings(
-    scope: Execution,
-    graph: GraphScopeInstruction,
-    revision: AutomationExecutionSnapshot,
-    steps: Record<string, NumenValue>,
-    consumer?: string,
-    visited = new Set<string>(),
-  ): void {
-    if (visited.has(scope.id)) throw new Error('cyclic graph scope ancestry')
-    visited.add(scope.id)
-    const enclosing = scope.scopeExecutionId ? this.getExecutionRow(scope.scopeExecutionId) : undefined
-    if (enclosing && revision.compiledPlan.instructions[enclosing.instruction_id]?.op === 'graph_iterate') {
-      const outer = enclosing.scope_execution_id ? this.getExecutionRow(enclosing.scope_execution_id) : undefined
-      const outerGraph = outer ? revision.compiledPlan.instructions[outer.instruction_id] : undefined
-      if (!outer || outerGraph?.op !== 'graph_scope' || outer.run_id !== scope.runId) throw new Error('graph iteration enclosing scope missing')
-      // Only the hosting iteration's dependency ancestors are visible in its body, from this exact outer instance.
-      this.appendGraphBindings(mapExecution(outer), outerGraph, revision, steps, enclosing.instruction_id, visited)
-    }
-    const allowed = consumer === undefined ? undefined : new Set<string>()
-    if (allowed && consumer) {
-      const pending = [consumer]
-      for (let index = 0; index < pending.length; index++) {
-        for (const edge of graph.edges) {
-          if (edge.to.nodeId !== pending[index] || edge.from.nodeId === graph.id || allowed.has(edge.from.nodeId)) continue
-          allowed.add(edge.from.nodeId)
-          pending.push(edge.from.nodeId)
-        }
-      }
-    }
-    const rows = this.ctx.database.db.prepare(`
-      SELECT child.instruction_id, child.output_json FROM graph_members AS member
-      JOIN executions AS child ON child.id = member.execution_id
-      WHERE member.scope_execution_id = ? AND child.status = 'COMPLETED' AND child.output_json IS NOT NULL
-      ORDER BY child.created_at, child.id
-    `).all(scope.id) as Array<{ instruction_id: string; output_json: string }>
-    for (const row of rows) {
-      if (!row.instruction_id.startsWith('__') && (!allowed || allowed.has(row.instruction_id))) steps[row.instruction_id] = parseJson(row.output_json)
-    }
-  }
-
-  private createBindings(run: Run, execution?: Execution): EvaluationBindings {
-    const steps: Record<string, NumenValue> = Object.create(null)
-    const revision = execution ? this.ctx.automations.getExecutionSnapshot(run.revisionId) : undefined
-    const parent = execution?.scopeExecutionId ? this.getExecutionRow(execution.scopeExecutionId) : undefined
-    const ownInstruction = execution ? revision?.compiledPlan.instructions[execution.instructionId] : undefined
-    const parentInstruction = parent ? revision?.compiledPlan.instructions[parent.instruction_id] : undefined
-    const graph = ownInstruction?.op === 'graph_scope' ? ownInstruction
-      : parentInstruction?.op === 'graph_scope' ? parentInstruction : undefined
-    if (graph && execution && revision) {
-      const scope = ownInstruction?.op === 'graph_scope' ? execution : mapExecution(parent!)
-      this.appendGraphBindings(scope, graph, revision, steps, ownInstruction?.op === 'graph_scope' ? undefined : execution.instructionId)
-    } else {
-      const rows = this.ctx.database.db.prepare(`
-        SELECT instruction_id, output_json FROM executions
-        WHERE run_id = ? AND status = 'COMPLETED' AND output_json IS NOT NULL
-        ORDER BY created_at, id
-      `).all(run.id) as Array<{ instruction_id: string; output_json: string }>
-      for (const row of rows) if (!row.instruction_id.startsWith('__')) steps[row.instruction_id] = parseJson(row.output_json)
-    }
-
-    if (execution && !graph) {
-      const ancestors = this.ctx.database.db.prepare(`
-        WITH RECURSIVE ancestors(id, parent_execution_id, instruction_id, output_json, status, depth) AS (
-          SELECT id, parent_execution_id, instruction_id, output_json, status, 0
-          FROM executions WHERE id = ?
-          UNION ALL
-          SELECT parent.id, parent.parent_execution_id, parent.instruction_id,
-            parent.output_json, parent.status, ancestors.depth + 1
-          FROM executions AS parent
-          JOIN ancestors ON parent.id = ancestors.parent_execution_id
-        )
-        SELECT instruction_id, output_json FROM ancestors
-        WHERE status = 'COMPLETED' AND output_json IS NOT NULL
-        ORDER BY depth DESC
-      `).all(execution.id) as Array<{
-        instruction_id: string
-        output_json: string
-      }>
-      for (const row of ancestors) {
-        if (!row.instruction_id.startsWith('__')) steps[row.instruction_id] = parseJson(row.output_json)
-      }
-    }
-    return {
-      run: {
-        id: run.id,
-        automationId: run.automationId,
-        revisionId: run.revisionId,
-      },
-      trigger: run.trigger,
-      input: run.input,
-      steps,
-      vars: {},
-      loop: execution?.loopIndex === undefined
-        ? {}
-        : { item: execution.loopItem ?? null, index: execution.loopIndex },
-      error: null,
-    }
-  }
-
-  private async execute(execution: Execution): Promise<void> {
-    try {
-      const { run, revision, instruction } = this.getRevisionForExecution(execution)
-      assertSupportedSnapshot(revision)
-      const bindings = this.createBindings(run, execution)
-      switch (instruction.op) {
-        case 'invoke': {
-          const contract = revision.contractSnapshot.capabilities.find(item => (
-            capabilityKey(item) === capabilityKey(instruction.capability)
-          ))
-          if (!contract) throw new Error(`frozen capability contract not found: ${capabilityKey(instruction.capability)}`)
-          await this.invokeCapability(execution, instruction, bindings, contract)
-          break
-        }
-        case 'graph_scope':
-          this.beginGraphScope(execution, instruction)
-          break
-        case 'graph_condition': {
-          const condition = evaluateExpression(instruction.condition, bindings)
-          if (typeof condition !== 'boolean') throw new Error('graph condition must evaluate to boolean')
-          this.completeInternal(execution, undefined, condition)
-          break
-        }
-        case 'graph_merge':
-          this.completeInternal(execution, undefined, this.graphMergeOutput(execution, instruction))
-          break
-        case 'graph_value':
-          this.completeSample(execution, instruction)
-          break
-        case 'branch': {
-          const condition = evaluateExpression(instruction.condition, bindings)
-          if (typeof condition !== 'boolean') throw new Error('branch condition must evaluate to boolean')
-          this.completeInternal(execution, condition ? instruction.then : instruction.else, condition)
-          break
-        }
-        case 'suspend':
-          this.suspendTimer(execution, instruction, bindings)
-          break
-        case 'fork':
-          this.forkAll(execution, instruction)
-          break
-        case 'iterate':
-        case 'graph_iterate':
-          this.beginIterate(execution, instruction, bindings)
-          break
-        case 'scope_complete':
-          this.completeScope(execution)
-          break
-        case 'join':
-          this.completeInternal(execution, instruction.next, null)
-          break
-        case 'complete': {
-          const output = instruction.output ? evaluateExpression(instruction.output, bindings) : null
-          this.completeRun(execution, output)
-          break
-        }
-        case 'fail':
-          this.failExecution(execution, evaluateExpression(instruction.error, bindings))
-          break
-        case 'eval':
-          this.failExecution(execution, { code: 'EVAL_ASSIGN_NOT_IMPLEMENTED', assign: instruction.assign })
-          break
-        default:
-          this.failExecution(execution, { code: 'INSTRUCTION_NOT_SUPPORTED' })
-      }
-    } catch (error) {
-      this.failExecution(execution, errorValue(error))
-    }
-  }
-
-  private async invokeCapability(
-    execution: Execution,
-    instruction: Extract<CoreInstruction, { op: 'invoke' }>,
-    bindings: EvaluationBindings,
-    contract: ContractSnapshotCapability,
-  ): Promise<void> {
-    const status = this.ctx.capabilities.get(instruction.capability)
-    const provider = this.ctx.capabilities.resolveProvider<NumenValue, NumenValue>(instruction.capability)
-    if (!status || !provider) {
-      this.blockExecution(execution, 'PROVIDER_UNAVAILABLE', { capability: capabilityKey(instruction.capability) })
-      return
-    }
-    const evaluatedInput = evaluateExpression(instruction.input, bindings)
-    const resolvedInput = status.definition.input(evaluatedInput)
-    if (!isNumenValue(resolvedInput)) throw new Error('capability input normalized to a non-Numen value')
-    const connectionIds = instruction.connections ?? (instruction.connection ? { default: instruction.connection } : {})
-    let connections: Record<string, unknown>
-    try {
-      const connectionService = this.connectionService()
-      if (!connectionService && Object.keys(connectionIds).length) throw new ConnectionBindingError('ConnectionService is unavailable')
-      connections = connectionService?.resolveRuntimes(connectionIds, contract.connections ?? []) ?? {}
-    } catch (error) {
-      if (error instanceof ConnectionRuntimeUnavailableError || error instanceof ConnectionBindingError) {
-        this.blockExecution(execution, 'CONNECTION_UNAVAILABLE', {
-          capability: capabilityKey(instruction.capability),
-          error: error.message,
-        })
-        return
-      }
-      throw error
-    }
-
-    const attemptId = id('attempt')
-    let attemptNumber = 0
-    const now = new Date().toISOString()
-    const claimedGeneration = this.ctx.database.transaction(() => {
-      if (!this.executionAcceptsWork(execution, 'RUNNABLE')) return
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions
-        SET status = 'RUNNING', resolved_input_json = ?, blocked_reason = NULL,
-            generation = generation + 1, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE' AND generation = ?
-        RETURNING generation
-      `).get(JSON.stringify(resolvedInput), now, execution.id, execution.generation) as { generation: number } | undefined
-      if (!result) return
-      const { number } = this.ctx.database.db.prepare(`
-        SELECT COALESCE(MAX(number), 0) + 1 AS number FROM attempts WHERE execution_id = ?
-      `).get(execution.id) as { number: number }
-      attemptNumber = number
-      this.ctx.database.db.prepare(`
-        INSERT INTO attempts (
-          id, execution_id, number, status, provider_ref, started_at
-        ) VALUES (?, ?, ?, 'RUNNING', ?, ?)
-      `).run(attemptId, execution.id, number, capabilityKey(instruction.capability), now)
-      this.appendEvent(execution.runId, 'AttemptStarted', { attemptId, executionId: execution.id, number }, now)
-      return result.generation
-    })
-    if (claimedGeneration === undefined) return
-    const invocation = { ...execution, generation: claimedGeneration }
-
-    const run = this.getRun(execution.runId)
-    const logMetadata = {
-      ...(run ? { automationId: run.automationId } : {}), runId: execution.runId,
-      executionId: execution.id, attemptId, traceId: execution.runId,
-      ...(Object.keys(connectionIds).length === 1 ? { connectionId: Object.values(connectionIds)[0]! } : {}),
-    }
-    withLogContext(logMetadata, () => this.ctx.logger('scheduler').info('Attempt started'))
-    const controller = new AbortController()
-    this.activeInvocations.set(execution.id, { runId: execution.runId, controller })
-    const timeoutMs = instruction.policy?.timeoutMs ?? contract.semantics.defaultTimeoutMs
-    try {
-      const output = await this.invokeWithGuards(() => withLogContext(logMetadata, () => provider.invoke({
-          input: resolvedInput,
-          connections,
-          signal: controller.signal,
-          idempotencyKey: attemptId,
-        })), controller, timeoutMs, execution.runId)
-      const validatedOutput = status.definition.output(output)
-      if (!isNumenValue(validatedOutput)) throw new Error('capability output is not a Numen value')
-      if (this.completeInvocation(invocation, attemptId, instruction.next, validatedOutput)) {
-        withLogContext(logMetadata, () => this.ctx.logger('scheduler').info('Attempt completed'))
-      }
-    } catch (error) {
-      if (error instanceof InvocationCancelledError) return
-      const timedOut = error instanceof InvocationTimeoutError
-      const accepted = this.settleFailedInvocation(
-        invocation,
-        attemptId,
-        attemptNumber,
-        instruction,
-        contract.semantics.retrySafe,
-        timedOut ? 'TIMED_OUT' : 'FAILED',
-        errorValue(error),
-      )
-      if (accepted) withLogContext(logMetadata, () => this.ctx.logger('scheduler').warn(timedOut ? 'Attempt timed out' : 'Attempt failed'))
-    } finally {
-      this.activeInvocations.delete(execution.id)
-    }
-  }
-
-  private async invokeWithGuards<T>(
-    invoke: () => Promise<T>,
-    controller: AbortController,
-    timeoutMs?: number,
-    runId?: string,
-  ): Promise<T> {
-    let timer: NodeJS.Timeout | undefined
-    let onAbort: (() => void) | undefined
-    const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => {
-        const reason = controller.signal.reason
-        reject(reason instanceof Error ? reason : new InvocationCancelledError('USER'))
-      }
-      if (controller.signal.aborted) {
-        onAbort()
-      } else {
-        controller.signal.addEventListener('abort', onAbort, { once: true })
-      }
-    })
-    if (timeoutMs !== undefined) {
-      timer = setTimeout(() => {
-        controller.abort(new InvocationTimeoutError(`capability timed out after ${timeoutMs}ms`))
-      }, timeoutMs)
-      timer.unref()
-    }
-    try {
-      const invocation = Promise.resolve().then(() => {
-        if (controller.signal.aborted) throw controller.signal.reason
-        return invoke()
-      })
-      if (runId) {
-        this.pendingProviders.set(invocation, runId)
-        const settled = () => {
-          this.pendingProviders.delete(invocation)
-          this.wakeDispatch?.()
-          if (this.autoDispatch) this.kick()
-        }
-        void invocation.then(settled, settled)
-      }
-      return await Promise.race([invocation, aborted])
-    } finally {
-      if (timer) clearTimeout(timer)
-      if (onAbort) controller.signal.removeEventListener('abort', onAbort)
-    }
-  }
-
-  /** Called under an immediate transaction before claiming or accepting an invocation. */
-  private executionAcceptsWork(execution: Execution, status: 'RUNNABLE' | 'RUNNING' | 'WAITING'): boolean {
-    const row = this.ctx.database.db.prepare(`
-      WITH RECURSIVE scopes(id, scope_execution_id, status, run_id) AS (
-        SELECT parent.id, parent.scope_execution_id, parent.status, parent.run_id
-        FROM executions AS child JOIN executions AS parent ON parent.id = child.scope_execution_id
-        WHERE child.id = ?
-        UNION
-        SELECT parent.id, parent.scope_execution_id, parent.status, parent.run_id
-        FROM executions AS parent JOIN scopes ON parent.id = scopes.scope_execution_id
-      )
-      SELECT 1 FROM executions AS current JOIN runs ON runs.id = current.run_id
-      WHERE current.id = ? AND current.run_id = ? AND current.status = ? AND current.generation = ?
-        AND runs.status = 'RUNNING'
-        AND NOT EXISTS (SELECT 1 FROM scopes WHERE run_id != current.run_id
-          OR status NOT IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED'))
-    `).get(execution.id, execution.id, execution.runId, status, execution.generation)
-    return !!row
-  }
-
-  private invocationAcceptsResult(execution: Execution, attemptId: string): boolean {
-    if (!this.executionAcceptsWork(execution, 'RUNNING')) return false
-    return !!this.ctx.database.db.prepare(`
-      SELECT 1 FROM attempts
-      WHERE id = ? AND execution_id = ? AND status = 'RUNNING'
-        AND number = (SELECT MAX(number) FROM attempts WHERE execution_id = ?)
-    `).get(attemptId, execution.id, execution.id)
-  }
-
-  private completeInvocation(execution: Execution, attemptId: string, next: string | undefined, output: NumenValue): boolean {
-    const now = new Date().toISOString()
-    return this.ctx.database.transaction(() => {
-      if (!this.invocationAcceptsResult(execution, attemptId)) return false
-      const attempt = this.ctx.database.db.prepare(`
-        UPDATE attempts SET status = 'SUCCEEDED', finished_at = ?
-        WHERE id = ? AND execution_id = ? AND status = 'RUNNING'
-      `).run(now, attemptId, execution.id)
-      if (!attempt.changes) return false
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'COMPLETED', output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNING' AND generation = ?
-      `).run(JSON.stringify(output), now, execution.id, execution.generation)
-      // A missed Execution CAS must also roll back the Attempt transition.
-      if (!result.changes) throw new Error('invocation generation changed during completion')
-      this.commitOutputResources(execution, output)
-      this.appendEvent(execution.runId, 'ExecutionCompleted', { executionId: execution.id, output }, now)
-      if (next) this.createSuccessor(execution, next)
-      return true
-    })
-  }
-
-  private settleFailedInvocation(
-    execution: Execution,
-    attemptId: string,
-    attemptNumber: number,
-    instruction: Extract<CoreInstruction, { op: 'invoke' }>,
-    retrySafe: boolean,
-    attemptStatus: 'FAILED' | 'TIMED_OUT',
-    error: NumenValue,
-  ): boolean {
-    const now = new Date().toISOString()
-    const retry = instruction.policy?.retry
-    const canRetry = retrySafe && attemptNumber < (retry?.maxAttempts ?? 1)
-    const outcomeUnknown = attemptStatus === 'TIMED_OUT' && !retrySafe
-    const attemptEvent = attemptStatus === 'TIMED_OUT' ? 'AttemptTimedOut' : 'AttemptFailed'
-    return this.ctx.database.transaction(() => {
-      if (!this.invocationAcceptsResult(execution, attemptId)) return false
-      const attemptResult = this.ctx.database.db.prepare(`
-        UPDATE attempts SET status = ?, error_json = ?, finished_at = ?
-        WHERE id = ? AND execution_id = ? AND status = 'RUNNING'
-      `).run(attemptStatus, JSON.stringify(error), now, attemptId, execution.id)
-      if (!attemptResult.changes) return false
-      this.appendEvent(execution.runId, attemptEvent, { attemptId, executionId: execution.id, error }, now)
-
-      if (outcomeUnknown) {
-        const result = this.ctx.database.db.prepare(`
-          UPDATE executions
-          SET status = 'BLOCKED', blocked_reason = 'OUTCOME_UNKNOWN', output_json = ?, updated_at = ?
-          WHERE id = ? AND status = 'RUNNING' AND generation = ?
-        `).run(JSON.stringify(error), now, execution.id, execution.generation)
-        if (!result.changes) throw new Error('invocation generation changed during failure settlement')
-        this.appendEvent(execution.runId, 'ExecutionBlocked', {
-          executionId: execution.id,
-          reason: 'OUTCOME_UNKNOWN',
-          details: { attemptId, error },
-        }, now)
-        return true
-      }
-
-      if (canRetry) {
-        const backoffMs = (retry?.backoffMs ?? 0) * (2 ** (attemptNumber - 1))
-        const wakeAt = new Date(Date.now() + backoffMs).toISOString()
-        const result = this.ctx.database.db.prepare(`
-          UPDATE executions
-          SET status = 'WAITING', blocked_reason = 'RETRY_BACKOFF', wake_at = ?, output_json = ?, updated_at = ?
-          WHERE id = ? AND status = 'RUNNING' AND generation = ?
-        `).run(wakeAt, JSON.stringify(error), now, execution.id, execution.generation)
-        if (!result.changes) throw new Error('invocation generation changed during failure settlement')
-        this.appendEvent(execution.runId, 'ExecutionRetryScheduled', {
-          executionId: execution.id,
-          attemptId,
-          nextAttempt: attemptNumber + 1,
-          wakeAt,
-        }, now)
-        return true
-      }
-
-      const executionStatus = attemptStatus === 'TIMED_OUT' ? 'TIMED_OUT' : 'FAILED'
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = ?, output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNING' AND generation = ?
-      `).run(executionStatus, JSON.stringify(error), now, execution.id, execution.generation)
-      if (!result.changes) throw new Error('invocation generation changed during failure settlement')
-      const runFailed = this.handleStructuredFailure(execution, now, error)
-      if (runFailed) {
-        this.ctx.database.db.prepare(`
-          UPDATE runs SET status = 'FAILED', finished_at = ? WHERE id = ? AND status = 'RUNNING'
-        `).run(now, execution.runId)
-      }
-      this.appendEvent(execution.runId, 'ExecutionFailed', {
-        executionId: execution.id,
-        status: executionStatus,
-        error,
-      }, now)
-      if (runFailed) this.appendEvent(execution.runId, 'RunFailed', { executionId: execution.id, error }, now)
-      return true
-    })
-  }
-
-  private completeInternal(execution: Execution, next: string | undefined, output: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'COMPLETED', output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(JSON.stringify(output), now, execution.id)
-      if (!result.changes) return
-      this.commitOutputResources(execution, output)
-      this.appendEvent(execution.runId, 'ExecutionCompleted', { executionId: execution.id, output }, now)
-      if (next) this.createSuccessor(execution, next)
-    })
-  }
-
-  private completeSample(execution: Execution, instruction: Extract<CoreInstruction, { op: 'graph_value' }>): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      if (!this.executionAcceptsWork(execution, 'RUNNABLE')) return
-      const result = this.ctx.database.db.prepare(`UPDATE executions SET status = 'COMPLETED', output_json = ?, sample_id = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'`).run(JSON.stringify(instruction.value), instruction.sampleId, now, execution.id)
-      if (!result.changes) return
-      this.appendEvent(execution.runId, 'ExecutionSampled', { executionId: execution.id, nodeId: instruction.id, sampleId: instruction.sampleId }, now)
-    })
-  }
-
-  private completeRun(execution: Execution, output: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'COMPLETED', output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(JSON.stringify(output), now, execution.id)
-      if (!result.changes) return
-      this.commitOutputResources(execution, output)
-      this.ctx.database.db.prepare(`
-        UPDATE runs SET status = 'COMPLETED', finished_at = ? WHERE id = ? AND status = 'RUNNING'
-      `).run(now, execution.runId)
-      this.appendEvent(execution.runId, 'ExecutionCompleted', { executionId: execution.id, output }, now)
-      this.appendEvent(execution.runId, 'RunCompleted', { output }, now)
-    })
-  }
-
-  private failExecution(execution: Execution, error: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'FAILED', output_json = ?, updated_at = ?
-        WHERE id = ? AND status IN ('RUNNABLE', 'RUNNING')
-      `).run(JSON.stringify(error), now, execution.id)
-      if (!result.changes) return
-      const runFailed = this.handleStructuredFailure(execution, now, error)
-      if (runFailed) {
-        this.ctx.database.db.prepare(`
-          UPDATE runs SET status = 'FAILED', finished_at = ? WHERE id = ? AND status = 'RUNNING'
-        `).run(now, execution.runId)
-      }
-      this.appendEvent(execution.runId, 'ExecutionFailed', { executionId: execution.id, error }, now)
-      if (runFailed) this.appendEvent(execution.runId, 'RunFailed', { executionId: execution.id, error }, now)
-    })
-  }
-
-  private blockExecution(execution: Execution, reason: string, details: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'BLOCKED', blocked_reason = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(reason, now, execution.id)
-      if (!result.changes) return
-      this.appendEvent(execution.runId, 'ExecutionBlocked', { executionId: execution.id, reason, details }, now)
-    })
-  }
-
-  private suspendTimer(
-    execution: Execution,
-    instruction: Extract<CoreInstruction, { op: 'suspend' }>,
-    bindings: EvaluationBindings,
-  ): void {
-    const nowMs = Date.now()
-    let wakeAtMs: number
-    if (instruction.config.durationMs) {
-      const duration = evaluateExpression(instruction.config.durationMs, bindings)
-      if (typeof duration !== 'number' || duration < 0) throw new Error('timer duration must be a non-negative number')
-      wakeAtMs = nowMs + duration
-    } else if (instruction.config.until) {
-      const until = evaluateExpression(instruction.config.until, bindings)
-      if (typeof until !== 'string') throw new Error('timer until must evaluate to an ISO date string')
-      wakeAtMs = Date.parse(until)
-      if (!Number.isFinite(wakeAtMs)) throw new Error('timer until is not a valid date')
-    } else {
-      throw new Error('timer has no wake source')
-    }
-    const wakeAt = new Date(wakeAtMs).toISOString()
-    const now = new Date(nowMs).toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'WAITING', wake_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(wakeAt, now, execution.id)
-      if (!result.changes) return
-      this.appendEvent(execution.runId, 'ExecutionWaiting', { executionId: execution.id, wakeAt }, now)
-    })
-  }
-
-  private resumeDueTimers(): number {
-    const now = new Date().toISOString()
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM executions
-      WHERE status = 'WAITING' AND wake_at IS NOT NULL AND wake_at <= ?
-      ORDER BY wake_at, id
-    `).all(now) as ExecutionRow[]
-    let count = 0
-    for (const row of rows) {
-      const execution = mapExecution(row)
-      if (row.blocked_reason === 'RETRY_BACKOFF') {
-        const changed = this.ctx.database.transaction(() => {
-          const result = this.ctx.database.db.prepare(`
-            UPDATE executions
-            SET status = 'RUNNABLE', blocked_reason = NULL, wake_at = NULL, updated_at = ?
-            WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'RETRY_BACKOFF'
-          `).run(now, execution.id)
-          if (!result.changes) return false
-          this.appendEvent(execution.runId, 'ExecutionRetryReady', { executionId: execution.id }, now)
-          return true
-        })
-        if (changed) count += 1
-        continue
-      }
-      const { instruction } = this.getRevisionForExecution(execution)
-      if (instruction.op !== 'suspend') continue
-      const changed = this.ctx.database.transaction(() => {
-        const result = this.ctx.database.db.prepare(`
-          UPDATE executions SET status = 'COMPLETED', output_json = 'null', updated_at = ?
-          WHERE id = ? AND status = 'WAITING'
-        `).run(now, execution.id)
-        if (!result.changes) return false
-        this.appendEvent(execution.runId, 'ExecutionResumed', { executionId: execution.id }, now)
-        if (instruction.next) this.createSuccessor(execution, instruction.next)
-        return true
-      })
-      if (changed) count += 1
-    }
-    return count
-  }
-
-  private reconcileBlockedExecutions(): number {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM executions
-      WHERE status = 'BLOCKED' AND blocked_reason IN ('PROVIDER_UNAVAILABLE', 'CONNECTION_UNAVAILABLE')
-      ORDER BY updated_at, id
-    `).all() as ExecutionRow[]
-    let count = 0
-    for (const row of rows) {
-      const execution = mapExecution(row)
-      const { revision, instruction } = this.getRevisionForExecution(execution)
-      if (instruction.op !== 'invoke' || !this.ctx.capabilities.resolveProvider(instruction.capability)) continue
-      if (row.blocked_reason === 'CONNECTION_UNAVAILABLE') {
-        const contract = revision.contractSnapshot.capabilities.find(item => capabilityKey(item) === capabilityKey(instruction.capability))
-        if (!contract) continue
-        try {
-          const connectionService = this.connectionService()
-          if (!connectionService) continue
-          connectionService.resolveRuntimes(
-            instruction.connections ?? (instruction.connection ? { default: instruction.connection } : {}),
-            contract.connections ?? [],
-          )
-        } catch {
-          continue
-        }
-      }
-      const now = new Date().toISOString()
-      const changed = this.ctx.database.transaction(() => {
-        const result = this.ctx.database.db.prepare(`
-          UPDATE executions SET status = 'RUNNABLE', blocked_reason = NULL, updated_at = ?
-          WHERE id = ? AND status = 'BLOCKED' AND blocked_reason = ?
-        `).run(now, execution.id, row.blocked_reason)
-        if (!result.changes) return false
-        this.appendEvent(execution.runId, 'ExecutionUnblocked', { executionId: execution.id }, now)
-        return true
-      })
-      if (changed) count += 1
-    }
-    return count
-  }
-
-  private connectionService(): ConnectionService | undefined {
-    return this.ctx.get('connections') as ConnectionService | undefined
-  }
-
-  private propagateCancellation(runId: string, reason: CancellationReason): boolean {
-    for (const active of this.activeInvocations.values()) {
-      if (active.runId === runId && !active.controller.signal.aborted) {
-        active.controller.abort(new InvocationCancelledError(reason))
-      }
-    }
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM executions
-      WHERE run_id = ? AND status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED', 'CANCELLING')
-      ORDER BY created_at, id
-    `).all(runId) as ExecutionRow[]
-    const now = new Date().toISOString()
-    return this.ctx.database.transaction(() => {
-      this.ctx.database.db.prepare(`
-        UPDATE attempts
-        SET status = 'ABORTED', error_json = ?, finished_at = ?
-        WHERE status = 'RUNNING' AND execution_id IN (
-          SELECT id FROM executions WHERE run_id = ?
-        )
-      `).run(JSON.stringify({ reason }), now, runId)
-      this.ctx.database.db.prepare(`
-        UPDATE execution_iterations SET status = 'CANCELLED', updated_at = ?
-        WHERE status IN ('PENDING', 'RUNNING') AND iterate_execution_id IN (
-          SELECT id FROM executions WHERE run_id = ?
-        )
-      `).run(now, runId)
-      for (const row of rows) {
-        const result = this.ctx.database.db.prepare(`
-          UPDATE executions
-          SET status = 'CANCELLED', blocked_reason = NULL, wake_at = NULL, updated_at = ?
-          WHERE id = ? AND status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED', 'CANCELLING')
-        `).run(now, row.id)
-        if (result.changes) {
-          this.appendEvent(runId, 'ExecutionCancelled', { executionId: row.id, reason }, now)
-        }
-      }
-      const result = this.ctx.database.db.prepare(`
-        UPDATE runs SET status = 'CANCELLED', cancel_reason = ?, finished_at = ?
-        WHERE id = ? AND status = 'CANCELLING'
-      `).run(reason, now, runId)
-      if (!result.changes) return false
-      this.appendEvent(runId, 'RunCancelled', { reason }, now)
-      return true
-    })
-  }
-
-  private reconcileCancellations(): number {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT id, cancel_reason FROM runs WHERE status = 'CANCELLING' ORDER BY created_at, id
-    `).all() as Array<{ id: string; cancel_reason: CancellationReason | null }>
-    let count = 0
-    for (const row of rows) {
-      if (this.propagateCancellation(row.id, row.cancel_reason ?? 'USER')) count += 1
-    }
-    return count
-  }
-
-  private recoverCancellations(): void {
-    this.reconcileCancellations()
-  }
-
-  private recoverInterruptedWork(): void {
-    const attempts = this.ctx.database.db.prepare(`
-      SELECT attempts.*, executions.run_id, executions.instruction_id
-      FROM attempts
-      JOIN executions ON executions.id = attempts.execution_id
-      JOIN runs ON runs.id = executions.run_id
-      WHERE attempts.status = 'RUNNING' AND executions.status = 'RUNNING' AND runs.status = 'RUNNING'
-      ORDER BY attempts.started_at, attempts.id
-    `).all() as Array<AttemptRow & { run_id: string; instruction_id: string }>
-
-    for (const attempt of attempts) {
-      const run = this.getRun(attempt.run_id)
-      const revision = run ? this.ctx.automations.getExecutionSnapshot(run.revisionId) : undefined
-      const instruction = revision?.compiledPlan.instructions[attempt.instruction_id]
-      const contract = instruction?.op === 'invoke'
-        ? revision?.contractSnapshot.capabilities.find(item => capabilityKey(item) === capabilityKey(instruction.capability))
-        : undefined
-      const retrySafe = contract?.semantics.retrySafe ?? false
-      const now = new Date().toISOString()
-      this.ctx.database.transaction(() => {
-        this.ctx.database.db.prepare(`
-          UPDATE attempts SET status = ?, finished_at = ? WHERE id = ? AND status = 'RUNNING'
-        `).run(retrySafe ? 'INTERRUPTED' : 'OUTCOME_UNKNOWN', now, attempt.id)
-        this.ctx.database.db.prepare(`
-          UPDATE executions SET status = ?, blocked_reason = ?, updated_at = ?
-          WHERE id = ? AND status = 'RUNNING'
-        `).run(retrySafe ? 'RUNNABLE' : 'BLOCKED', retrySafe ? null : 'OUTCOME_UNKNOWN', now, attempt.execution_id)
-        this.appendEvent(attempt.run_id, retrySafe ? 'AttemptInterrupted' : 'AttemptOutcomeUnknown', {
-          attemptId: attempt.id,
-          executionId: attempt.execution_id,
-          retrySafe,
-        }, now)
-      })
-    }
-
-    const internal = this.ctx.database.db.prepare(`
-      SELECT executions.* FROM executions
-      JOIN runs ON runs.id = executions.run_id
-      WHERE executions.status = 'RUNNING' AND runs.status = 'RUNNING'
-        AND NOT EXISTS (
-          SELECT 1 FROM attempts
-          WHERE attempts.execution_id = executions.id AND attempts.status = 'RUNNING'
-        )
-    `).all() as ExecutionRow[]
-    for (const row of internal) {
-      const now = new Date().toISOString()
-      this.ctx.database.transaction(() => {
-        this.ctx.database.db.prepare(`
-          UPDATE executions SET status = 'RUNNABLE', updated_at = ?
-          WHERE id = ? AND status = 'RUNNING'
-        `).run(now, row.id)
-        this.appendEvent(row.run_id, 'ExecutionRecovered', { executionId: row.id }, now)
-      })
-    }
-  }
-
-  private recoverStructuredScopes(): void {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT * FROM executions
-      WHERE status = 'WAITING' AND blocked_reason IN ('CHILDREN', 'ITERATIONS')
-      ORDER BY created_at, id
-    `).all() as ExecutionRow[]
-    const now = new Date().toISOString()
-    for (const row of rows) {
-      const fork = mapExecution(row)
-      const { revision, instruction } = this.getRevisionForExecution(fork)
-      this.ctx.database.transaction(() => {
-        if (instruction.op === 'iterate' || instruction.op === 'graph_iterate') {
-          this.reconcileIterate(fork, instruction, now)
-          return
-        }
-        if (instruction.op !== 'fork') return
-        if (instruction.mode === 'all') {
-          this.reconcileAllFork(row.id, now)
-          return
-        }
-        const completed = this.ctx.database.db.prepare(`
-          SELECT * FROM executions
-          WHERE scope_execution_id = ? AND status = 'COMPLETED'
-          ORDER BY updated_at, id
-        `).all(row.id) as ExecutionRow[]
-        const winner = completed.find(candidate => (
-          revision.compiledPlan.instructions[candidate.instruction_id]?.op === 'scope_complete'
-        ))
-        if (winner) this.reconcileRaceFork(row.id, mapExecution(winner), now)
-      })
-    }
-  }
-
-  private graphMemberRows(scopeExecutionId: string): Map<string, GraphMemberRow> {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT members.*, child.status, child.output_json, child.blocked_reason
-      FROM graph_members AS members LEFT JOIN executions AS child ON child.id = members.execution_id
-      WHERE members.scope_execution_id = ? ORDER BY members.node_id
-    `).all(scopeExecutionId) as GraphMemberRow[]
-    return new Map(rows.map(row => [row.node_id, row]))
-  }
-
-  private validateGraphScope(instruction: GraphScopeInstruction, revision: AutomationExecutionSnapshot): void {
-    if (instruction.version !== 1) throw new Error('unsupported graph scope version')
-    const members = new Set(instruction.members)
-    if (members.size !== instruction.members.length || members.has(instruction.id)) throw new Error('invalid graph members')
-    for (const member of members) {
-      const node = revision.compiledPlan.instructions[member]
-      if (!node || !['invoke', 'graph_condition', 'graph_merge', 'graph_iterate', 'graph_value'].includes(node.op)) throw new Error('invalid graph member instruction')
-      if (node.op === 'invoke' && node.next !== undefined) throw new Error('graph member cannot have a sequential successor')
-      if (node.op === 'graph_merge' && (new Set(node.inputs).size !== node.inputs.length || !node.inputs.length)) throw new Error('invalid graph merge inputs')
-      if (node.op === 'graph_iterate') this.validateGraphIteration(node, revision)
-    }
-    const edgeIds = new Set<string>()
-    const destinations = new Set<string>()
-    for (const edge of instruction.edges) {
-      if (edgeIds.has(edge.id)) throw new Error('duplicate graph edge')
-      edgeIds.add(edge.id)
-      const target = revision.compiledPlan.instructions[edge.to.nodeId]
-      if (!members.has(edge.to.nodeId) || !target) throw new Error('invalid graph edge target')
-      const source = revision.compiledPlan.instructions[edge.from.nodeId]
-      const start = edge.from.nodeId === instruction.id && edge.from.port === 'start'
-      if (!start && (!members.has(edge.from.nodeId) || !source
-        || (source.op === 'graph_condition' ? !['true', 'false'].includes(edge.from.port) : edge.from.port !== 'out'))) throw new Error('invalid graph edge source')
-      if (target.op === 'graph_merge') {
-        const destination = JSON.stringify([edge.to.nodeId, edge.to.port])
-        if (start || !target.inputs.includes(edge.to.port) || destinations.has(destination)) throw new Error('invalid graph merge edge')
-        destinations.add(destination)
-      } else if (edge.to.port !== 'in') throw new Error('invalid graph input port')
-    }
-    for (const member of members) {
-      const incoming = instruction.edges.filter(edge => edge.to.nodeId === member)
-      const node = revision.compiledPlan.instructions[member]!
-      if (!incoming.length || (node.op === 'graph_merge' && incoming.length !== node.inputs.length)) throw new Error('graph member inputs are not connected')
-    }
-  }
-
-  private beginGraphScope(execution: Execution, instruction: GraphScopeInstruction): void {
-    const { revision } = this.getRevisionForExecution(execution)
-    this.validateGraphScope(instruction, revision)
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'WAITING', blocked_reason = 'GRAPH_MEMBERS', updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-          AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'RUNNING')
-      `).run(now, execution.id, execution.runId)
-      if (!result.changes) return
-      const insert = this.ctx.database.db.prepare(`
-        INSERT INTO graph_members (scope_execution_id, node_id, created_at, updated_at) VALUES (?, ?, ?, ?)
-      `)
-      for (const member of instruction.members) insert.run(execution.id, member, now, now)
-      this.appendEvent(execution.runId, 'ExecutionGraphStarted', { executionId: execution.id, members: instruction.members }, now)
-    })
-  }
-
-  private graphEdgeValue(edge: GraphEdge, instruction: GraphScopeInstruction, members: Map<string, GraphMemberRow>, revision: AutomationExecutionSnapshot): GraphEdgeValue {
-    if (edge.from.nodeId === instruction.id && edge.from.port === 'start') return { state: 'completed', value: null }
-    const member = members.get(edge.from.nodeId)
-    if (!member) throw new Error('graph source member is missing')
-    if (member.skipped) return { state: 'skipped' }
-    if (member.status !== 'COMPLETED') return { state: 'pending' }
-    // SQL NULL means no result was persisted. JSON "null" is a completed value.
-    if (member.output_json === null) throw new Error('completed graph member has no persisted output')
-    const value = parseJson<NumenValue>(member.output_json)
-    if (revision.compiledPlan.instructions[edge.from.nodeId]?.op === 'graph_condition') {
-      if (typeof value !== 'boolean') throw new Error('persisted graph condition is not boolean')
-      if (edge.from.port !== String(value)) return { state: 'skipped' }
-    }
-    return { state: 'completed', value }
-  }
-
-  private graphMergeOutput(execution: Execution, instruction: Extract<CoreInstruction, { op: 'graph_merge' }>): NumenValue {
-    if (!execution.scopeExecutionId) throw new Error('graph merge scope missing')
-    const scopeRow = this.getExecutionRow(execution.scopeExecutionId)
-    if (!scopeRow) throw new Error('graph merge scope missing')
-    const { revision, instruction: scope } = this.getRevisionForExecution(mapExecution(scopeRow))
-    if (scope.op !== 'graph_scope') throw new Error('graph merge parent is not a graph scope')
-    const members = this.graphMemberRows(scopeRow.id)
-    const values = scope.edges.filter(edge => edge.to.nodeId === instruction.id)
-      .map(edge => ({ name: edge.to.port, result: this.graphEdgeValue(edge, scope, members, revision) }))
-    if (values.length !== instruction.inputs.length || values.some(value => value.result.state === 'pending')) throw new Error('graph merge inputs are not ready')
-    const completed = values.filter((value): value is { name: string; result: { state: 'completed'; value: NumenValue } } => value.result.state === 'completed')
-    if (instruction.mode === 'selected') {
-      if (completed.length !== 1) throw new Error('selected graph merge requires exactly one successful input')
-      return completed[0]!.result.value
-    }
-    if (completed.length !== values.length || new Set(completed.map(value => value.name)).size !== values.length) throw new Error('graph merge inputs are not uniquely complete')
-    return Object.fromEntries(completed.map(value => [value.name, value.result.value]))
-  }
-
-  private reconcileGraphScopes(): number {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT executions.* FROM executions JOIN runs ON runs.id = executions.run_id
-      WHERE executions.status = 'WAITING' AND executions.blocked_reason = 'GRAPH_MEMBERS' AND runs.status = 'RUNNING'
-      ORDER BY executions.created_at, executions.id
-    `).all() as ExecutionRow[]
-    let transitions = 0
-    for (const row of rows) {
-      const execution = mapExecution(row)
-      try {
-        const { revision, instruction } = this.getRevisionForExecution(execution)
-        assertSupportedSnapshot(revision)
-        if (instruction.op !== 'graph_scope') throw new Error('graph scope instruction missing')
-        transitions += this.reconcileGraphScope(execution, instruction, revision)
-      } catch (error) {
-        this.failGraphScope(execution, errorValue(error))
-        transitions += 1
-      }
-    }
-    return transitions
-  }
-
-  private reconcileGraphScope(execution: Execution, instruction: GraphScopeInstruction, revision: AutomationExecutionSnapshot): number {
-    return this.ctx.database.transaction(() => {
-      const current = this.getExecutionRow(execution.id)
-      if (current?.status !== 'WAITING' || current.blocked_reason !== 'GRAPH_MEMBERS' || this.getRun(execution.runId)?.status !== 'RUNNING') return 0
-      this.validateGraphScope(instruction, revision)
-      const members = this.graphMemberRows(execution.id)
-      if (members.size !== instruction.members.length || instruction.members.some(member => !members.has(member))) throw new Error('persisted graph members do not match the immutable plan')
-      if ([...members.values()].some(member => member.status && ['FAILED', 'TIMED_OUT', 'CANCELLED'].includes(member.status))) throw new Error('graph child terminated unsuccessfully')
-      const now = new Date().toISOString()
-      let transitions = 0
-      let changed = true
-      while (changed) {
-        changed = false
-        for (const [nodeId, member] of members) {
-          if (member.skipped || member.execution_id) continue
-          const node = revision.compiledPlan.instructions[nodeId]!
-          const incoming = instruction.edges.filter(edge => edge.to.nodeId === nodeId)
-          const values = incoming.map(edge => this.graphEdgeValue(edge, instruction, members, revision))
-          let skip: boolean
-          if (node.op === 'graph_merge' && node.mode === 'selected') {
-            if (values.some(value => value.state === 'pending')) continue
-            const completed = values.filter(value => value.state === 'completed').length
-            if (completed > 1) throw new Error('selected graph merge received multiple successful inputs')
-            skip = completed === 0
-          } else {
-            skip = values.some(value => value.state === 'skipped')
-            if (!skip && values.some(value => value.state === 'pending')) continue
-          }
-          if (skip) {
-            const result = this.ctx.database.db.prepare(`
-              UPDATE graph_members SET skipped = 1, updated_at = ?
-              WHERE scope_execution_id = ? AND node_id = ? AND skipped = 0 AND execution_id IS NULL
-            `).run(now, execution.id, nodeId)
-            if (!result.changes) continue
-            member.skipped = 1
-            this.appendEvent(execution.runId, 'GraphMemberSkipped', { scopeExecutionId: execution.id, nodeId }, now)
-          } else {
-            // Unique member identity and its Execution are committed in one immediate transaction.
-            const childId = this.createExecution(execution.runId, nodeId, execution.id, execution.id, undefined, execution.loopItem, execution.loopIndex)
-            const result = this.ctx.database.db.prepare(`
-              UPDATE graph_members SET execution_id = ?, updated_at = ?
-              WHERE scope_execution_id = ? AND node_id = ? AND skipped = 0 AND execution_id IS NULL
-            `).run(childId, now, execution.id, nodeId)
-            if (!result.changes) throw new Error('graph member was already dispatched')
-            member.execution_id = childId
-            member.status = 'RUNNABLE'
-          }
-          changed = true
-          transitions += 1
-        }
-      }
-      const remaining = [...members.values()].filter(member => !member.skipped && member.status !== 'COMPLETED')
-      if (remaining.length) {
-        if (remaining.every(member => member.execution_id === null)) throw new Error('graph dependencies cannot become ready')
-        return transitions
-      }
-      const output = instruction.output ? evaluateExpression(instruction.output, this.createBindings(this.getRun(execution.runId)!, execution)) : null
-      const completed = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'COMPLETED', blocked_reason = NULL, output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'GRAPH_MEMBERS'
-      `).run(JSON.stringify(output), now, execution.id)
-      if (!completed.changes) return transitions
-      this.commitOutputResources(execution, output)
-      this.appendEvent(execution.runId, 'ExecutionGraphCompleted', { executionId: execution.id, output }, now)
-      if (instruction.next) this.createSuccessor(execution, instruction.next)
-      else {
-        this.ctx.database.db.prepare(`UPDATE runs SET status = 'COMPLETED', finished_at = ? WHERE id = ? AND status = 'RUNNING'`).run(now, execution.runId)
-        this.appendEvent(execution.runId, 'RunCompleted', { output }, now)
-      }
-      return transitions + 1
-    })
-  }
-
-  private failGraphScope(execution: Execution, error: NumenValue): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'FAILED', blocked_reason = NULL, output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'GRAPH_MEMBERS'
-      `).run(JSON.stringify(error), now, execution.id)
-      if (!result.changes) return
-      this.cancelScopeExecutions(execution.id, execution.runId, 'PARENT', now)
-      this.appendEvent(execution.runId, 'ExecutionGraphFailed', { executionId: execution.id, error }, now)
-      if (this.handleStructuredFailure(execution, now, error)) {
-        this.ctx.database.db.prepare(`UPDATE runs SET status = 'FAILED', finished_at = ? WHERE id = ? AND status = 'RUNNING'`).run(now, execution.runId)
-        this.appendEvent(execution.runId, 'RunFailed', { executionId: execution.id, error }, now)
-      }
-    })
-  }
-
-  private createSuccessor(execution: Execution, instructionId: string): string {
-    return this.createExecution(
-      execution.runId,
-      instructionId,
-      execution.id,
-      execution.scopeExecutionId,
-      execution.scopeBranch,
-      execution.loopItem,
-      execution.loopIndex,
-    )
-  }
-
-  private forkAll(
-    execution: Execution,
-    instruction: Extract<CoreInstruction, { op: 'fork' }>,
-  ): void {
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions
-        SET status = 'WAITING', blocked_reason = 'CHILDREN', updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(now, execution.id)
-      if (!result.changes) return
-      this.appendEvent(execution.runId, 'ExecutionForked', {
-        executionId: execution.id,
-        mode: instruction.mode,
-        branches: instruction.branches,
-      }, now)
-      for (const [branchIndex, branch] of instruction.branches.entries()) {
-        this.createExecution(
-          execution.runId,
-          branch,
-          execution.id,
-          execution.id,
-          branchIndex,
-          execution.loopItem,
-          execution.loopIndex,
-        )
-      }
-    })
-  }
-
-  private validateGraphIteration(instruction: Extract<CoreInstruction, { op: 'graph_iterate' }>, revision: AutomationExecutionSnapshot): void {
-    const body = revision.compiledPlan.instructions[instruction.body]
-    if (!Number.isSafeInteger(instruction.concurrency) || instruction.concurrency < 1) throw new Error('invalid graph iteration concurrency')
-    if (body?.op !== 'graph_scope' || body.output === undefined
-      || !body.next || revision.compiledPlan.instructions[body.next]?.op !== 'scope_complete') throw new Error('graph iteration requires an explicit body output and scope completion')
-  }
-
-  private beginIterate(
-    execution: Execution,
-    instruction: Extract<CoreInstruction, { op: 'iterate' | 'graph_iterate' }>,
-    bindings: EvaluationBindings,
-  ): void {
-    if (instruction.op === 'graph_iterate') this.validateGraphIteration(instruction, this.getRevisionForExecution(execution).revision)
-    const items = evaluateExpression(instruction.items, bindings)
-    if (!Array.isArray(items)) throw new Error('ForEach items must evaluate to an array')
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      if (instruction.op === 'graph_iterate' && !this.executionAcceptsWork(execution, 'RUNNABLE')) return
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions
-        SET status = 'WAITING', blocked_reason = 'ITERATIONS', resolved_input_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(JSON.stringify(items), now, execution.id)
-      if (!result.changes) return
-      const insert = this.ctx.database.db.prepare(`
-        INSERT INTO execution_iterations (
-          iterate_execution_id, item_index, item_json, status, created_at, updated_at
-        ) VALUES (?, ?, ?, 'PENDING', ?, ?)
-      `)
-      items.forEach((item, index) => insert.run(execution.id, index, JSON.stringify(item), now, now))
-      this.appendEvent(execution.runId, 'ExecutionIterationStarted', {
-        executionId: execution.id,
-        itemCount: items.length,
-        concurrency: instruction.concurrency,
-      }, now)
-      this.reconcileIterate(execution, instruction, now)
-    })
-  }
-
-  private reconcileIterate(
-    iterate: Execution,
-    instruction: Extract<CoreInstruction, { op: 'iterate' | 'graph_iterate' }>,
-    now: string,
-  ): void {
-    const current = this.getExecutionRow(iterate.id)
-    if (!current || current.status !== 'WAITING' || current.blocked_reason !== 'ITERATIONS') return
-    if (instruction.op === 'graph_iterate' && !this.executionAcceptsWork(iterate, 'WAITING')) return
-    const { running } = this.ctx.database.db.prepare(`
-      SELECT COUNT(*) AS running FROM execution_iterations
-      WHERE iterate_execution_id = ? AND status = 'RUNNING'
-    `).get(iterate.id) as { running: number }
-    const capacity = Math.max(0, instruction.concurrency - running)
-    if (capacity) {
-      const pending = this.ctx.database.db.prepare(`
-        SELECT * FROM execution_iterations
-        WHERE iterate_execution_id = ? AND status = 'PENDING'
-        ORDER BY item_index LIMIT ?
-      `).all(iterate.id, capacity) as IterationRow[]
-      for (const item of pending) {
-        const claimed = this.ctx.database.db.prepare(`
-          UPDATE execution_iterations SET status = 'RUNNING', updated_at = ?
-          WHERE iterate_execution_id = ? AND item_index = ? AND status = 'PENDING'
-        `).run(now, iterate.id, item.item_index)
-        if (!claimed.changes) continue
-        const value = parseJson<NumenValue>(item.item_json)
-        const rootExecutionId = this.createExecution(
-          iterate.runId,
-          instruction.body,
-          iterate.id,
-          iterate.id,
-          item.item_index,
-          value,
-          item.item_index,
-        )
-        this.ctx.database.db.prepare(`
-          UPDATE execution_iterations SET root_execution_id = ?, updated_at = ?
-          WHERE iterate_execution_id = ? AND item_index = ?
-        `).run(rootExecutionId, now, iterate.id, item.item_index)
-        this.appendEvent(iterate.runId, 'ExecutionIterationDispatched', {
-          executionId: iterate.id,
-          itemIndex: item.item_index,
-          rootExecutionId,
-        }, now)
-      }
-    }
-    const counts = this.ctx.database.db.prepare(`
-      SELECT
-        SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END) AS running,
-        COUNT(*) AS total
-      FROM execution_iterations WHERE iterate_execution_id = ?
-    `).get(iterate.id) as { pending: number | null; running: number | null; total: number }
-    if ((counts.pending ?? 0) || (counts.running ?? 0)) return
-    const output: NumenValue = instruction.op === 'graph_iterate' ? this.collectGraphIterationResults(iterate, instruction, counts.total) : { count: counts.total }
-    const completed = this.ctx.database.db.prepare(`
-      UPDATE executions
-      SET status = 'COMPLETED', blocked_reason = NULL, output_json = ?, updated_at = ?
-      WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'ITERATIONS'
-    `).run(JSON.stringify(output), now, iterate.id)
-    if (!completed.changes) return
-    if (instruction.op === 'graph_iterate') this.commitOutputResources(iterate, output)
-    this.appendEvent(iterate.runId, 'ExecutionIterationCompleted', {
-      executionId: iterate.id,
-      itemCount: counts.total,
-    }, now)
-    if (instruction.op === 'graph_iterate') return
-    this.createExecution(
-      iterate.runId,
-      instruction.join,
-      iterate.id,
-      iterate.scopeExecutionId,
-      iterate.scopeBranch,
-      iterate.loopItem,
-      iterate.loopIndex,
-    )
-  }
-
-  private collectGraphIterationResults(iterate: Execution, instruction: Extract<CoreInstruction, { op: 'graph_iterate' }>, total: number): NumenValue[] {
-    const rows = this.ctx.database.db.prepare(`
-      SELECT iteration.item_index, iteration.status, root.instruction_id, root.scope_execution_id, root.scope_branch,
-        root.status AS root_status, root.output_json
-      FROM execution_iterations AS iteration LEFT JOIN executions AS root ON root.id = iteration.root_execution_id
-      WHERE iteration.iterate_execution_id = ? ORDER BY iteration.item_index
-    `).all(iterate.id) as Array<{ item_index: number; status: string; instruction_id: string | null; scope_execution_id: string | null; scope_branch: number | null; root_status: string | null; output_json: string | null }>
-    if (rows.length !== total || rows.some((row, index) => row.item_index !== index || row.status !== 'COMPLETED'
-      || row.instruction_id !== instruction.body || row.scope_execution_id !== iterate.id || row.scope_branch !== index
-      || row.root_status !== 'COMPLETED' || row.output_json === null)) throw new Error('graph iteration results are incomplete or belong to another scope')
-    return rows.map(row => parseJson<NumenValue>(row.output_json!))
-  }
-
-  private completeScope(execution: Execution): void {
-    if (!execution.scopeExecutionId) {
-      this.failExecution(execution, { code: 'SCOPE_PARENT_MISSING' })
-      return
-    }
-    const now = new Date().toISOString()
-    this.ctx.database.transaction(() => {
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'COMPLETED', output_json = 'null', updated_at = ?
-        WHERE id = ? AND status = 'RUNNABLE'
-      `).run(now, execution.id)
-      if (!result.changes) return
-      this.appendEvent(execution.runId, 'ExecutionScopeCompleted', {
-        executionId: execution.id,
-        scopeExecutionId: execution.scopeExecutionId!,
-      }, now)
-      const forkRow = this.ctx.database.db.prepare('SELECT * FROM executions WHERE id = ?')
-        .get(execution.scopeExecutionId) as ExecutionRow | undefined
-      if (!forkRow) return
-      const { instruction } = this.getRevisionForExecution(mapExecution(forkRow))
-      if (instruction.op === 'fork') {
-        if (instruction.mode === 'all') this.reconcileAllFork(execution.scopeExecutionId!, now)
-        else this.reconcileRaceFork(execution.scopeExecutionId!, execution, now)
-        return
-      }
-      if (instruction.op === 'iterate' || instruction.op === 'graph_iterate') {
-        if (execution.scopeBranch === undefined) return
-        const updated = this.ctx.database.db.prepare(`
-          UPDATE execution_iterations
-          SET status = 'COMPLETED', terminal_execution_id = ?, updated_at = ?
-          WHERE iterate_execution_id = ? AND item_index = ? AND status = 'RUNNING'
-        `).run(execution.id, now, execution.scopeExecutionId, execution.scopeBranch)
-        if (!updated.changes) return
-        this.appendEvent(execution.runId, 'ExecutionIterationItemCompleted', {
-          executionId: execution.scopeExecutionId!,
-          itemIndex: execution.scopeBranch,
-          terminalExecutionId: execution.id,
-        }, now)
-        this.reconcileIterate(mapExecution(forkRow), instruction, now)
-      }
-    })
-  }
-
-  private reconcileAllFork(forkExecutionId: string, now: string): void {
-    const forkRow = this.ctx.database.db.prepare(`
-      SELECT * FROM executions WHERE id = ?
-    `).get(forkExecutionId) as ExecutionRow | undefined
-    if (!forkRow || forkRow.status !== 'WAITING' || forkRow.blocked_reason !== 'CHILDREN') return
-    const { remaining } = this.ctx.database.db.prepare(`
-      SELECT COUNT(*) AS remaining FROM executions
-      WHERE scope_execution_id = ? AND status != 'COMPLETED'
-    `).get(forkExecutionId) as { remaining: number }
-    if (remaining) return
-    const fork = mapExecution(forkRow)
-    const { instruction } = this.getRevisionForExecution(fork)
-    if (instruction.op !== 'fork' || instruction.mode !== 'all') return
-    const result = this.ctx.database.db.prepare(`
-      UPDATE executions
-      SET status = 'COMPLETED', blocked_reason = NULL, output_json = 'null', updated_at = ?
-      WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'CHILDREN'
-    `).run(now, forkExecutionId)
-    if (!result.changes) return
-    this.appendEvent(fork.runId, 'ExecutionJoined', {
-      executionId: fork.id,
-      mode: 'all',
-    }, now)
-    this.createExecution(
-      fork.runId,
-      instruction.join,
-      fork.id,
-      fork.scopeExecutionId,
-      fork.scopeBranch,
-      fork.loopItem,
-      fork.loopIndex,
-    )
-  }
-
-  private reconcileRaceFork(forkExecutionId: string, winner: Execution, now: string): void {
-    if (winner.scopeBranch === undefined) return
-    const forkRow = this.ctx.database.db.prepare('SELECT * FROM executions WHERE id = ?')
-      .get(forkExecutionId) as ExecutionRow | undefined
-    if (!forkRow || forkRow.status !== 'WAITING' || forkRow.blocked_reason !== 'CHILDREN') return
-    const fork = mapExecution(forkRow)
-    const { instruction } = this.getRevisionForExecution(fork)
-    if (instruction.op !== 'fork' || instruction.mode !== 'first_success') return
-    const output = { winnerBranch: winner.scopeBranch, winnerExecutionId: winner.id }
-    const result = this.ctx.database.db.prepare(`
-      UPDATE executions
-      SET status = 'COMPLETED', blocked_reason = NULL, output_json = ?, updated_at = ?
-      WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'CHILDREN'
-    `).run(JSON.stringify(output), now, forkExecutionId)
-    if (!result.changes) return
-    this.cancelScopeExecutions(forkExecutionId, fork.runId, 'RACE', now, {
-      excludeBranch: winner.scopeBranch,
-    })
-    this.appendEvent(fork.runId, 'ExecutionRaceWon', {
-      executionId: fork.id,
-      winnerBranch: winner.scopeBranch,
-      winnerExecutionId: winner.id,
-    }, now)
-    this.appendEvent(fork.runId, 'ExecutionJoined', { executionId: fork.id, mode: 'first_success' }, now)
-    this.createExecution(
-      fork.runId,
-      instruction.join,
-      fork.id,
-      fork.scopeExecutionId,
-      fork.scopeBranch,
-      fork.loopItem,
-      fork.loopIndex,
-    )
-  }
-
-  private handleStructuredFailure(execution: Execution, now: string, error: NumenValue): boolean {
-    if (!execution.scopeExecutionId) return true
-    const forkRow = this.ctx.database.db.prepare('SELECT * FROM executions WHERE id = ?')
-      .get(execution.scopeExecutionId) as ExecutionRow | undefined
-    if (!forkRow) return true
-    const fork = mapExecution(forkRow)
-    const { instruction } = this.getRevisionForExecution(fork)
-    if (instruction.op === 'iterate' || instruction.op === 'graph_iterate') {
-      if (execution.scopeBranch === undefined) return true
-      this.ctx.database.db.prepare(`
-        UPDATE execution_iterations
-        SET status = 'FAILED', error_json = ?, updated_at = ?
-        WHERE iterate_execution_id = ? AND item_index = ? AND status = 'RUNNING'
-      `).run(JSON.stringify(error), now, fork.id, execution.scopeBranch)
-      this.cancelScopeExecutions(fork.id, execution.runId, 'PARENT', now)
-      this.ctx.database.db.prepare(`
-        UPDATE execution_iterations
-        SET status = 'CANCELLED', updated_at = ?
-        WHERE iterate_execution_id = ? AND status IN ('PENDING', 'RUNNING')
-      `).run(now, fork.id)
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions
-        SET status = 'FAILED', blocked_reason = NULL, output_json = ?, updated_at = ?
-        WHERE id = ? AND status = 'WAITING' AND blocked_reason = 'ITERATIONS'
-      `).run(JSON.stringify(error), now, fork.id)
-      if (result.changes) {
-        this.appendEvent(execution.runId, 'ExecutionIterationFailed', {
-          executionId: fork.id,
-          itemIndex: execution.scopeBranch,
-          failedExecutionId: execution.id,
-          error,
-        }, now)
-      }
-      return this.handleStructuredFailure(fork, now, error)
-    }
-    if (instruction.op === 'graph_scope') {
-      this.cancelScopeExecutions(fork.id, execution.runId, 'PARENT', now)
-      this.ctx.database.db.prepare(`
-        UPDATE executions SET status = 'FAILED', blocked_reason = NULL, output_json = ?, updated_at = ?
-        WHERE id = ? AND status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED')
-      `).run(JSON.stringify(error), now, fork.id)
-      this.appendEvent(execution.runId, 'ExecutionGraphFailed', { executionId: fork.id, failedExecutionId: execution.id, error }, now)
-      return this.handleStructuredFailure(fork, now, error)
-    }
-    if (instruction.op !== 'fork') return true
-
-    if (instruction.mode === 'first_success') {
-      if (execution.scopeBranch === undefined) return true
-      this.cancelScopeExecutions(fork.id, execution.runId, 'PARENT', now, {
-        includeBranch: execution.scopeBranch,
-      })
-      this.appendEvent(execution.runId, 'ExecutionRaceBranchFailed', {
-        executionId: fork.id,
-        branch: execution.scopeBranch ?? -1,
-        failedExecutionId: execution.id,
-        error,
-      }, now)
-      const { failedBranches } = this.ctx.database.db.prepare(`
-        SELECT COUNT(DISTINCT scope_branch) AS failedBranches FROM executions
-        WHERE scope_execution_id = ? AND status IN ('FAILED', 'TIMED_OUT')
-      `).get(fork.id) as { failedBranches: number }
-      if (failedBranches < instruction.branches.length) return false
-    } else {
-      this.cancelScopeExecutions(fork.id, execution.runId, 'PARENT', now)
-    }
-
-    const result = this.ctx.database.db.prepare(`
-      UPDATE executions
-      SET status = 'FAILED', blocked_reason = NULL, output_json = ?, updated_at = ?
-      WHERE id = ? AND status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED')
-    `).run(JSON.stringify(error), now, fork.id)
-    if (result.changes) {
-      this.appendEvent(execution.runId, 'ExecutionScopeFailed', {
-        executionId: fork.id,
-        failedExecutionId: execution.id,
-        error,
-      }, now)
-    }
-    return this.handleStructuredFailure(fork, now, error)
-  }
-
-  private cancelScopeExecutions(
-    scopeExecutionId: string,
-    runId: string,
-    reason: 'PARENT' | 'RACE',
-    now: string,
-    filter: { includeBranch?: number; excludeBranch?: number } = {},
-  ): void {
-    const rows = this.ctx.database.db.prepare(`
-      WITH RECURSIVE descendants(id, root_branch) AS (
-        SELECT id, scope_branch FROM executions WHERE scope_execution_id = ?
-        UNION ALL
-        SELECT executions.id, descendants.root_branch FROM executions
-        JOIN descendants ON executions.scope_execution_id = descendants.id
-      )
-      SELECT executions.*, descendants.root_branch FROM executions
-      JOIN descendants ON descendants.id = executions.id
-      WHERE executions.status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED', 'CANCELLING')
-    `).all(scopeExecutionId) as Array<ExecutionRow & { root_branch: number | null }>
-    for (const row of rows) {
-      if (filter.includeBranch !== undefined && row.root_branch !== filter.includeBranch) continue
-      if (filter.excludeBranch !== undefined && row.root_branch === filter.excludeBranch) continue
-      const active = this.activeInvocations.get(row.id)
-      if (active && !active.controller.signal.aborted) {
-        active.controller.abort(new InvocationCancelledError(reason))
-      }
-      this.ctx.database.db.prepare(`
-        UPDATE attempts SET status = 'ABORTED', error_json = ?, finished_at = ?
-        WHERE execution_id = ? AND status = 'RUNNING'
-      `).run(JSON.stringify({ reason }), now, row.id)
-      const result = this.ctx.database.db.prepare(`
-        UPDATE executions
-        SET status = 'CANCELLED', blocked_reason = NULL, wake_at = NULL, updated_at = ?
-        WHERE id = ? AND status IN ('RUNNABLE', 'RUNNING', 'WAITING', 'BLOCKED', 'CANCELLING')
-      `).run(now, row.id)
-      this.ctx.database.db.prepare(`
-        UPDATE execution_iterations SET status = 'CANCELLED', updated_at = ?
-        WHERE iterate_execution_id = ? AND status IN ('PENDING', 'RUNNING')
-      `).run(now, row.id)
-      if (result.changes) {
-        this.appendEvent(runId, 'ExecutionCancelled', { executionId: row.id, reason }, now)
-      }
-    }
-  }
-
-  private commitOutputResources(execution: Execution, output: NumenValue): void {
-    const resourceIds = new Set<string>()
-    const visit = (value: NumenValue): void => {
-      if (isResourceRef(value)) {
-        resourceIds.add(value.$resource)
-        return
-      }
-      if (Array.isArray(value)) {
-        for (const item of value) visit(item)
-        return
-      }
-      if (value && typeof value === 'object') {
-        for (const item of Object.values(value)) visit(item)
-      }
-    }
-    visit(output)
-    for (const resourceId of resourceIds) {
-      this.ctx.resources.commitOwner(resourceId, { type: 'execution', id: execution.id })
-    }
   }
 }
 
-export default SchedulerService
+declare module 'cordis' {
+  interface Context {
+    scheduler: SchedulerService
+  }
+
+  interface Events {
+    'numen/run-change'(runId: string): void
+  }
+}

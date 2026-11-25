@@ -23,7 +23,9 @@
     "@numenjs/logging": "workspace:*"
   },
   "devDependencies": {
+    "@numenjs/config": "workspace:*",
     "@numenjs/credentials": "workspace:*",
+    "@numenjs/runtime": "workspace:*",
     "schemastery": "^3.18.0"
   }
 }
