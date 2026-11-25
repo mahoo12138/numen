@@ -78,6 +78,27 @@ email, and CSV parsing/export. Configure credentials and connections through the
 existing Schema forms. See [the MQTT → CSV → email guide](docs/29-official-messaging-integrations.md)
 and [ecosystem comparison and remaining platform gaps](docs/28-ecosystem-comparison.md).
 
+GitHub Webhook triggers verify HMAC-SHA256 signatures over the original request
+body, filter event types and actions, and durably deduplicate delivery IDs within
+the same Revision and Trigger. Configure the webhook secret through a Credential
+and bind its Connection to the Trigger. See [GitHub setup and delivery semantics](docs/32-official-github-integration.md).
+The default configuration includes `github: {}`; existing deployments must add it
+explicitly. This is a workspace integration, not an npm publication announcement.
+
+Feishu custom bots provide `feishu:send-text@1` with encrypted webhook credentials,
+optional signing, bounded requests and explicit rate-limit errors. Bind a bot
+Connection to notify a group about GitHub events. New defaults include `feishu: {}`;
+see [the Feishu guide](website/src/integrations/feishu.md) and [full contract](packages/integration-feishu/README.md).
+
+RSS / Atom reading provides `rss:read@1` as a bounded snapshot Query. Use explicit
+ForEach steps to process entries, and Cron to schedule reads; repeated reads retain
+existing items and do not implement cross-run deduplication. GitHub also supports
+Issue get/create/comment operations using a separate encrypted API Token Connection.
+See [the RSS workflow guide](website/src/integrations/rss.md),
+[GitHub Issue operations](website/src/integrations/github-actions.md), and
+[the n8n ecosystem research](docs/33-n8n-next-integrations-research.md). Existing
+deployments must add `rss: {}` and enable the shared `http` service for these operations.
+
 Automation concurrency policies support persistent queues, dropping new runs and
 replacing the oldest active runs, with optional grouping by accepted trigger/input
 data. Test runs have separate capacity from production runs. See

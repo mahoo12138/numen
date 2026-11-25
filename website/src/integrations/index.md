@@ -4,7 +4,7 @@ description: Numen 官方集成的能力、连接要求与使用边界。
 
 # 官方集成
 
-从本地数据处理到外部事件和通知，当前工作区提供 9 个官方集成。每个操作都是独立的版本化 Capability；下表中的版本均为 `1`。
+从本地数据处理到外部事件和通知，当前工作区提供 12 个官方集成。每个操作都是独立的版本化 Capability；下表中的版本均为 `1`。
 
 **Trigger** 接收事件并创建 Run，**Query** 读取或转换数据，**Action** 执行操作。Query 和 Action 都可作为流程节点。数组是普通值，需要逐项执行时使用 ForEach。
 
@@ -20,9 +20,12 @@ description: Numen 官方集成的能力、连接要求与使用边界。
 | [数据处理](#data) | `data` | `data:json-parse`、`data:json-stringify`、`data:object-merge`、`data:array-unique` | Query |
 | [日期时间](#datetime) | `datetime` | `datetime:now`、`datetime:format`、`datetime:add`、`datetime:diff` | Query |
 | [Webhook](#webhook) | `webhook` | `webhook:receive` | Trigger |
+| [GitHub](#github) | `github` | `github:webhook`、`github:issue-get`、`github:issue-create`、`github:issue-comment` | Trigger / Query / Action |
 | [CSV](#csv) | `csv` | `csv:parse`、`csv:stringify` | Query |
 | [MQTT](#mqtt) | `mqtt` | `mqtt:message` / `mqtt:publish` | Trigger / Action |
 | [SMTP](#smtp) | `smtp` | `smtp:send` | Action |
+| [RSS / Atom](#rss) | `rss` | `rss:read` | Query |
+| [飞书](#feishu) | `feishu` | `feishu:send-text` | Action |
 
 ## Echo {#echo}
 
@@ -86,6 +89,16 @@ description: Numen 官方集成的能力、连接要求与使用边界。
 
 [配置入口、鉴权与完整示例 →](./webhook)
 
+## GitHub {#github}
+
+`github:webhook` 验证 GitHub 原始请求体的 HMAC-SHA256 签名，按事件和 action 筛选投递，通过 `auth` 槽位绑定 `github:webhook-auth@1` Connection。Webhook Secret 保存在 Credential 中。
+
+通过验证的 `ping` 只返回确认；匹配的业务事件持久化后创建 Run。同 Revision、同 Trigger 的相同 delivery ID 返回原 Run，重启后仍可去重。激活新 Revision 会开始新的去重范围。签名覆盖请求体，不覆盖事件类型和 delivery ID 请求头。
+
+`github:issue-get` 查询 Issue，`github:issue-create` 创建 Issue，`github:issue-comment` 添加评论。这三个操作通过 `api` 槽位绑定 GitHub API Token Connection，与 Webhook Secret 分开。写操作不自动重试。
+
+[配置 GitHub Webhook、签名与去重 →](./github) · [配置 Token 与 Issue 操作 →](./github-actions)
+
 ## CSV {#csv}
 
 `csv:parse` 将文本变为 `{ rows, columns }`，单元格保持字符串；`csv:stringify` 将行对象变为 `{ text }`。支持逗号、分号和 Tab，识别 BOM、引号及多行单元格。
@@ -109,3 +122,15 @@ description: Numen 官方集成的能力、连接要求与使用边界。
 输出包括 `messageId`、`accepted`、`rejected`。服务器接受提交不代表最终送达；部分拒收需要检查 `rejected`。当前不含附件、任意请求头或文件读取，不会自动重发结果不确定的邮件。
 
 [配置 SMTP 与发送报告 →](./messaging#smtp)
+
+## 飞书 {#feishu}
+
+`feishu:send-text` 使用 `bot` 槽位绑定 `feishu:bot@1` Connection，向群自定义机器人提交文本。Webhook 地址和可选签名密钥保存在 Credential；发送使用宿主 HTTP 客户端，明确报告限流、拒绝、取消和超时，不自动重试。
+
+[配置飞书机器人与 GitHub 通知 →](./feishu)
+
+## RSS / Atom {#rss}
+
+`rss:read` 读取 RSS 2.0 或 Atom 1.0，返回订阅信息、标准化的 `items` 数组和截断信息。无需 Connection，可与 Cron、ForEach、GitHub 和飞书组合。保留原始顺序与重复条目；它读取当前快照，不维护跨次执行的已读游标。
+
+[读取订阅并逐条创建 Issue →](./rss)

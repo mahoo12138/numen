@@ -40,6 +40,10 @@ export default defineConfig({
       { text: '官方集成', items: [
         { text: '集成目录', link: '/integrations/' },
         { text: 'Webhook 数据流程', link: '/integrations/webhook' },
+        { text: 'GitHub 事件接入', link: '/integrations/github' },
+        { text: 'GitHub Issue 操作', link: '/integrations/github-actions' },
+        { text: 'RSS / Atom 订阅', link: '/integrations/rss' },
+        { text: '飞书群通知', link: '/integrations/feishu' },
         { text: 'MQTT、CSV 与邮件', link: '/integrations/messaging' },
       ] },
       { text: '扩展 Numen', items: [

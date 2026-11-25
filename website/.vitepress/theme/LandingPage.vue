@@ -34,6 +34,7 @@ function tabKey(event: KeyboardEvent, index: number) {
 }
 const integrations = [
   { id: 'webhook', name: 'Webhook', text: '从 HTTP 请求启动', icon: 'event', trigger: true, action: false },
+  { id: 'github', name: 'GitHub', text: '仓库事件、Issue 查询与协作', icon: 'link', trigger: true, action: true },
   { id: 'cron', name: 'Cron', text: '按计划定时运行', icon: 'clock', trigger: true, action: false },
   { id: 'mqtt', name: 'MQTT', text: '订阅与发布消息', icon: 'signal', trigger: true, action: true },
   { id: 'http', name: 'HTTP', text: '连接外部 API', icon: 'link', trigger: false, action: true },
@@ -41,11 +42,17 @@ const integrations = [
   { id: 'datetime', name: 'Date & Time', text: '时区与日历运算', icon: 'clock', trigger: false, action: true },
   { id: 'csv', name: 'CSV', text: '结构化数据与文本', icon: 'grid', trigger: false, action: true },
   { id: 'smtp', name: 'SMTP', text: '发送邮件通知', icon: 'mail', trigger: false, action: true },
+  { id: 'rss', name: 'RSS / Atom', text: '读取订阅源并逐条处理', icon: 'link', trigger: false, action: true },
+  { id: 'feishu', name: '飞书', text: '发送群机器人通知', icon: 'mail', trigger: false, action: true },
   { id: 'echo', name: 'Echo', text: '本地验证与调试', icon: 'terminal', trigger: false, action: true },
 ]
 const filter = ref('all')
 const filteredIntegrations = computed(() => integrations.filter(item => filter.value === 'all' || (filter.value === 'trigger' ? item.trigger : item.action)))
-const filters = [{ id: 'all', label: '全部', count: 9 }, { id: 'trigger', label: '事件触发', count: 3 }, { id: 'action', label: '查询与动作', count: 7 }]
+const filters = [
+  { id: 'all', label: '全部', count: integrations.length },
+  { id: 'trigger', label: '事件触发', count: integrations.filter(item => item.trigger).length },
+  { id: 'action', label: '查询与动作', count: integrations.filter(item => item.action).length },
+]
 const command = 'pnpm install\npnpm build\npnpm dev --print-launch-url'
 const copied = ref('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined

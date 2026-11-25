@@ -18,7 +18,7 @@
 
 | 领域 | 当前代码与差距 | 优先级 / 归属 |
 | --- | --- | --- |
-| 官方集成覆盖 | 已有 Echo、HTTP、Cron，以及数据/日期/Webhook；本轮新增 MQTT、SMTP、CSV。仍缺 GitHub、企业消息、常见数据库、对象存储和 SaaS 专用封装。见 [Runtime 注册](../packages/runtime/src/app.ts) 和各 `integration-*` 包。 | 按实际场景补插件，不以空壳节点数量衡量生态。 |
+| 官方集成覆盖 | 已有 Echo、HTTP、Cron、数据/日期/Webhook、MQTT、SMTP、CSV；已补充 GitHub Webhook、Issue 查询/创建/评论、飞书文本通知和 RSS/Atom 读取。仍缺常见数据库、对象存储及更多 SaaS 专用封装。见 [Runtime 注册](../packages/runtime/src/app.ts) 和各 `integration-*` 包。 | 按实际场景补插件，不以空壳节点数量衡量生态。 |
 | 外部包加载 | [Runtime](../packages/runtime/src/app.ts) 已支持 Loader、`$package` 和 Entry 生命周期；本轮浏览器用真实 MQTT 包的外部入口验证。注册/表单/执行不要求把插件逻辑写进 Workbench。 | 已有基础，不重建插件机制。 |
 | 触发健康与生命周期 | [TriggerService](../packages/triggers/src/service.ts) 原有激活/停止和持久接受；本轮补充 `reportStatus()`，让长连接断线后可以回报 ERROR 并在恢复后 READY。同步激活/清理期间的重入也要串行重算并隔离旧订阅。 | 本轮通用适配修复。 |
 | 自动化并发策略 | 后续本轮补齐 `maxActive/overflow/groupBy` 的持久准入：接受时冻结、按组排队、丢弃收据、按需替换最早运行、测试名额隔离，以及 Workbench 策略配置。SQLite v18 迁移、25 项准入组合测试和真实 Webhook 浏览器验收已通过。 | **P0 已交付**。行为与边界见 [运行并发与持久准入](30-run-admission.md)。单活跃 Scheduler；不承诺外部副作用严格一次。 |
@@ -42,11 +42,12 @@
 
 验收使用真实本地 Broker、TLS/STARTTLS SMTP Server、SQLite、Credential、Connection、TriggerService 和 Scheduler。浏览器从配置凭据开始，发布并启用流程后发送消息，检查 Run 与邮件内容，再验证插件卸载/恢复与 Broker 断线。包测试补充认证失败、证书拒绝、部分接受、取消、超时、重启和边界输入。实际运行结果在交付时分别报告；本地 fixture 不替代外部 Broker/邮箱账号联调。
 
-## 下一批建议
+## 后续交付与下一批建议
 
-1. **GitHub webhook**：从手工配置回调开始，按事件/action 过滤，使用 delivery ID，基于原始 body 验证 HMAC；随后再考虑 GitHub App 安装与订阅管理。[投递实践](https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks)、[签名验证](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)。本地签名 fixture 不能冒充真实 GitHub 权限和投递验收。
-2. **飞书或 Slack 通知**：选择一种服务，封装消息结构、秘密 webhook URL、签名和限流错误，而不是给 HTTP POST 换名称。[飞书机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot)、[Slack incoming webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)。
-3. **Resource 文本/文件桥接与邮件附件**：使用已有 Resource 所有权、租约和回收机制。验证失败/取消清理、重启后可读和附件上限；不要开放任意宿主文件路径。
-4. **模板安装流程**：先提供“MQTT 告警通知”“Webhook 数据清洗”“CSV 报告邮件”三个模板，以版本检查、连接重绑定和未启用草稿导入作为验收标准。
+1. **GitHub webhook 已实现**：手工配置回调，按事件/action 过滤，使用 delivery ID，基于原始 body 验证 HMAC；去重范围为同 Revision、同 Trigger。详见 [GitHub 插件](32-official-github-integration.md)。GitHub App 安装与订阅管理仍待后续；本地签名 fixture 不替代真实公网投递验收。
+2. **飞书文本通知已实现**：加密 webhook URL、可选签名、消息大小边界和明确限流错误，沿用现有 Connection 和 HTTP 服务。详见 [飞书指南](../website/src/integrations/feishu.md)。Slack、消息卡片和应用机器人授权仍待后续。
+3. **RSS/Atom 与 GitHub Issue 已实现**：参考 n8n 的独立操作设计，新增订阅快照读取，以及 PAT 连接下的 Issue 查询、创建与评论。RSS 不维护跨次游标；GitHub 写操作不自动重试。详见 [调研与边界](33-n8n-next-integrations-research.md)。
+4. **Resource 文本/文件桥接与邮件附件**：使用已有 Resource 所有权、租约和回收机制。验证失败/取消清理、重启后可读和附件上限；不要开放任意宿主文件路径。
+5. **模板安装流程**：先提供“MQTT 告警通知”“Webhook 数据清洗”“CSV 报告邮件”三个模板，以版本检查、连接重绑定和未启用草稿导入作为验收标准。
 
 不引入 n8n/Activepieces/Node-RED 文件兼容层，不替换编辑器或执行模型，不做 Google Calendar 轮询，也不以新增插件为理由重写整个调度器。

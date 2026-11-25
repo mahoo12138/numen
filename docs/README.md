@@ -81,6 +81,8 @@
 - [28. 官方生态对照、平台差距与优先级](28-ecosystem-comparison.md)
 - [29. 官方消息、通知与 CSV 插件](29-official-messaging-integrations.md)
 - [30. 自动化运行并发与持久准入](30-run-admission.md)
+- [32. 官方 GitHub Webhook 插件](32-official-github-integration.md)
+- [飞书群机器人：连接、文本通知与错误边界](../packages/integration-feishu/README.md)
 - [N0–N4 整体验收与本地公共包消费检查（2026-10-10）](verification/n0-n4-acceptance-2026-10-10.md)
 - [N2-01 固定快照查看验收](verification/version-workspace-2026-10-08.md)
 - [N2-02 固定版本语义比较验收](verification/semantic-comparison-2026-10-08.md)
@@ -93,3 +95,7 @@
 - [N4-03 Workbench 容量与交互性能基线](verification/workbench-capacity-2026-10-08.md)
 - [Workbench 文案解析性能优化与前后对照](verification/workbench-render-performance-2026-10-08.md)
 - [Workbench 拖拽资格计算优化与前后对照](verification/workbench-move-eligibility-2026-10-08.md)
+
+- [33. n8n 生态参考：RSS 与 GitHub 操作](33-n8n-next-integrations-research.md)
+- [RSS / Atom：读取与逐项处理](../website/src/integrations/rss.md)
+- [GitHub Issue：查询、创建与评论](../website/src/integrations/github-actions.md)
